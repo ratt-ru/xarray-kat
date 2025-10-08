@@ -14,15 +14,15 @@ FULL_POLARIZATIONS = ["HH", "HV", "VH", "VV"]
 DATA_TYPE_LABELS = {
   "correlator_data": (
     ("time", "frequency", "corrprod"),
-    ("time", "baseline", "frequency", "polarization"),
+    ("time", "baseline_id", "frequency", "polarization"),
   ),
   "flags": (
     ("time", "frequency", "corrprod"),
-    ("time", "baseline", "frequency", "polarization"),
+    ("time", "baseline_id", "frequency", "polarization"),
   ),
   "weights": (
     ("time", "frequency", "corrprod"),
-    ("time", "baseline", "frequency", "polarization"),
+    ("time", "baseline_id", "frequency", "polarization"),
   ),
   "weights_channel": (("time", "frequency"), ("time", "frequency")),
 }
