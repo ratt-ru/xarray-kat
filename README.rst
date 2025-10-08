@@ -48,12 +48,17 @@ If dask is installed, one can request chunking along dimensions:
   capture_block_id = 123456789
   url = f"https://archive-gw-1.kat.ac.za/{capture_block_id}/{capture_block_id}_sdp_l0.full.rdb?token={token}"
 
+  # This specifies the natural chunking of the
+  # underlying store
   dt = xarray.open_datatree(url, chunks={})
   dt = dt.compute()
 
-  # This chunking schema fetches more data
-  # than strictly necessary at present
-  # but illustrates the interface
+  # More exotic chunking can be selected, but
+  # as this pattern does not match the natural
+  # chunking, it results in repeated requests for
+  # the same data. It may be better to use a
+  # dask.rechunk operation ontop of the natural
+  # chunking, or use cache pools to ameliorate this
   dt = xarray.open_datatree(url, chunks={"time": 20, "baseline_id": 155, "frequency": 256})
   dt = dt.compute()
 

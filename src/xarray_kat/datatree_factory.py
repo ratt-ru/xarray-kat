@@ -51,13 +51,19 @@ class GroupFactory:
     flags = LazilyIndexedArray(TensorstoreArray(stores["flags"]))
     weights = LazilyIndexedArray(TensorstoreArray(stores["weights"]))
 
+    def store_chunks(n):
+      return stores[n].chunk_layout.read_chunk.shape
+
     dims = ("time", "baseline_id", "frequency", "polarization")
+    vis_encoding = {"preferred_chunks": dict(zip(dims, store_chunks("correlator_data")))}
+    flag_encoding = {"preferred_chunks": dict(zip(dims, store_chunks("flags")))}
+    weight_encoding = {"preferred_chunks": dict(zip(dims, store_chunks("weights")))}
 
     ds = xarray.Dataset(
       {
-        "VISIBILITY": xarray.Variable(dims, vis),
-        "FLAG": xarray.Variable(dims, flags),
-        "WEIGHT": xarray.Variable(dims, weights),
+        "VISIBILITY": xarray.Variable(dims, vis, None, vis_encoding),
+        "FLAG": xarray.Variable(dims, flags, None, flag_encoding),
+        "WEIGHT": xarray.Variable(dims, weights, None, weight_encoding),
       },
       coords={
         "time": xarray.Variable("time", timestamps),
