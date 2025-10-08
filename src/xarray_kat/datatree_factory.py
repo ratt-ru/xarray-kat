@@ -21,7 +21,7 @@ class GroupFactory:
     integration_time = telstate["int_time"]
     ntime = chunk_info["correlator_data"]["shape"][0]
 
-    # band = telstate["sub_band"]
+    band = telstate["sub_band"]
     nchan = telstate["n_chans"]
     bandwidth = telstate["bandwidth"]
     center_freq = telstate["center_freq"]
@@ -51,13 +51,42 @@ class GroupFactory:
     flags = LazilyIndexedArray(TensorstoreArray(stores["flags"]))
     weights = LazilyIndexedArray(TensorstoreArray(stores["weights"]))
 
-    def store_chunks(n):
+    def schunks(n):
       return stores[n].chunk_layout.read_chunk.shape
 
     dims = ("time", "baseline_id", "frequency", "polarization")
-    vis_encoding = {"preferred_chunks": dict(zip(dims, store_chunks("correlator_data")))}
-    flag_encoding = {"preferred_chunks": dict(zip(dims, store_chunks("flags")))}
-    weight_encoding = {"preferred_chunks": dict(zip(dims, store_chunks("weights")))}
+    vis_encoding = {"preferred_chunks": dict(zip(dims, schunks("correlator_data")))}
+    flag_encoding = {"preferred_chunks": dict(zip(dims, schunks("flags")))}
+    weight_encoding = {"preferred_chunks": dict(zip(dims, schunks("weights")))}
+
+    time_attrs = {
+      "type": "time",
+      "units": "s",
+      "scale": "utc",
+      "format": "unix",
+      "integration_time": {
+        "attrs": {"type": "quanitity", "units": "s"},
+        "data": integration_time,
+      },
+    }
+
+    freq_attrs = {
+      "type": "spectral_coord",
+      "observer": "TOPO",
+      "units": "Hz",
+      "spectral_window_name": f"{band}-band",
+      "frequency_group_name": "none",
+      "reference_frequency": {
+        "attrs": {"type": "spectral_coord", "observer": "TOPO", "units": "Hz"},
+        # TODO(sjperkins): Confirm this
+        "data": center_freq,
+      },
+      "channel_width": {
+        "attrs": {"type": "quantity", "units": "Hz"},
+        "data": channel_width,
+      },
+      "effective_channel_width": "EFFECTIVE_CHANNEL_WIDTH",
+    }
 
     ds = xarray.Dataset(
       {
@@ -66,8 +95,8 @@ class GroupFactory:
         "WEIGHT": xarray.Variable(dims, weights, None, weight_encoding),
       },
       coords={
-        "time": xarray.Variable("time", timestamps),
-        "frequency": xarray.Variable("frequency", chan_freqs),
+        "time": xarray.Variable("time", timestamps, time_attrs),
+        "frequency": xarray.Variable("frequency", chan_freqs, freq_attrs),
         "polarization": xarray.Variable("polarization", ["XX", "XY", "YX", "YY"]),
         "baseline_id": xarray.Variable("baseline_id", np.arange(len(ant1))),
         "baseline_antenna1_name": xarray.Variable("baseline_id", ant_names[ant1]),
