@@ -9,7 +9,7 @@ Required Reading
 You'll need some familiarity with xarray_. In particular:
 
 - `Indexing and selecting data <xarray-indexing_>`_
-- `Lazy Loading behaviour <xarray-lazy-indexing_>`-
+- `Lazy Loading behaviour <xarray-lazy-indexing_>`_
 
 
 Example Usage
