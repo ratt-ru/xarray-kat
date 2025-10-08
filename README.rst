@@ -1,7 +1,7 @@
 Direct xarray views over the MeerKAT archive
 ============================================
 
-This archive present an array view over observations in the MeerKAT archive.
+This archive present an xarray view over observations in the MeerKAT archive.
 
 Required Reading
 ----------------
