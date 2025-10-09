@@ -46,18 +46,21 @@ class GroupFactory:
     ant1, ant2 = np.triu_indices(len(ant_names), 0)
 
     stores = StoreFactory.make(telstate, endpoint, token)
+    data_vars: Dict[str, xarray.Variable] = {}
 
-    vis = LazilyIndexedArray(TensorstoreArray(stores["correlator_data"]))
-    flags = LazilyIndexedArray(TensorstoreArray(stores["flags"]))
-    weights = LazilyIndexedArray(TensorstoreArray(stores["weights"]))
+    meerkat_to_msv4_name = {
+      "correlator_data": "VISIBILITY",
+      "flags": "FLAG",
+      "weights": "WEIGHT"
+    }
 
-    def schunks(n):
-      return stores[n].chunk_layout.read_chunk.shape
-
-    dims = ("time", "baseline_id", "frequency", "polarization")
-    vis_encoding = {"preferred_chunks": dict(zip(dims, schunks("correlator_data")))}
-    flag_encoding = {"preferred_chunks": dict(zip(dims, schunks("flags")))}
-    weight_encoding = {"preferred_chunks": dict(zip(dims, schunks("weights")))}
+    for ts_name, msv4_name in meerkat_to_msv4_name.items():
+      tensorstore_array = stores[ts_name]
+      array = LazilyIndexedArray(TensorstoreArray(tensorstore_array))
+      dims = tensorstore_array.domain.labels
+      chunks = tensorstore_array.chunk_layout.read_chunk.shape
+      encoding = {"preferred_chunks": dict(zip(dims, chunks))}
+      data_vars[msv4_name] = xarray.Variable(dims, array, None, encoding)
 
     time_attrs = {
       "type": "time",
@@ -89,11 +92,7 @@ class GroupFactory:
     }
 
     ds = xarray.Dataset(
-      {
-        "VISIBILITY": xarray.Variable(dims, vis, None, vis_encoding),
-        "FLAG": xarray.Variable(dims, flags, None, flag_encoding),
-        "WEIGHT": xarray.Variable(dims, weights, None, weight_encoding),
-      },
+      data_vars=data_vars,
       coords={
         "time": xarray.Variable("time", timestamps, time_attrs),
         "frequency": xarray.Variable("frequency", chan_freqs, freq_attrs),
