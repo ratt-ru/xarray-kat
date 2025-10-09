@@ -1,5 +1,8 @@
 import asyncio
+from functools import reduce
+import logging
 from io import BytesIO
+from operator import mul
 from typing import Any, Collection, Dict, Tuple
 
 import numpy as np
@@ -11,6 +14,12 @@ from numpy.lib.format import read_array_header_1_0, read_array_header_2_0, read_
 from xarray_kat.async_loop import AsyncLoopSingleton
 
 FULL_POLARIZATIONS = ["HH", "HV", "VH", "VV"]
+MISSING_VALUES = {
+  "correlator_data": np.nan + np.nan * 1j,
+  "flags": 1,
+  "weights": 0,
+  "weights_channel": 0.0
+}
 DATA_TYPE_LABELS = {
   "correlator_data": (
     ("time", "frequency", "corrprod"),
@@ -27,6 +36,8 @@ DATA_TYPE_LABELS = {
   "weights_channel": (("time", "frequency"), ("time", "frequency")),
 }
 
+
+log = logging.getLogger(__name__)
 
 def http_spec_factory(endpoint: str, token: str | None) -> Dict[str, Collection[str]]:
   spec: Dict[str, Collection[str]] = {
@@ -46,6 +57,7 @@ def virtual_chunked_store(
   data_schema: Dict[str, Any],
   cp_argsort: npt.NDArray,
   dim_labels: Tuple[Tuple[str, ...], Tuple[str, ...]],
+  missing_value: Any,
   context: ts.Context,
 ) -> ts.KvStore:
   dtype = data_schema["dtype"]
@@ -98,27 +110,45 @@ def virtual_chunked_store(
       key_parts = [f"{o:05}" for o in domain.origin]
 
     key = f"{prefix}/{data_type}/{'_'.join(key_parts)}.npy"
-    # print(f"Initiating read {key} into domain {domain}")
 
     async def key_reader(store, key):
       return await store.read(key)
 
-    read_result = asyncio.run_coroutine_threadsafe(
-      key_reader(http_store, key), AsyncLoopSingleton().instance
-    ).result()
+    def read_array(raw_bytes: bytes) -> npt.NDArray | None:
+      """Attempts to reconstruct the NumPy array from raw bytes
+      Returns None if the bytes are truncated or otherwise corrupt"""
+      if len(raw_bytes) == 0:
+        return None
 
-    # print(f"Completed read {key} into domain {domain}")
-    raw_bytes = read_result.value
-    fp = BytesIO(raw_bytes)
-    version = read_magic(fp)
-    read_header = read_array_header_1_0 if version == (1, 0) else read_array_header_2_0
-    shape, fortran_order, dtype = read_header(fp)
-    data = np.frombuffer(raw_bytes[fp.tell() :], dtype=dtype)
-    if fortran_order:
-      data.shape = shape[::-1]
-      data = data.transpose()
-    else:
-      data.shape = shape
+      fp = BytesIO(raw_bytes)
+      try:
+        version = read_magic(fp)
+        read_header = read_array_header_1_0 if version == (1, 0) else read_array_header_2_0
+        shape, fortran_order, dtype = read_header(fp)
+      except ValueError:
+        return None
+
+      # Are there enough bytes for a reconstruction?
+      if len(array_bytes := raw_bytes[fp.tell():]) != reduce(mul, shape, dtype.itemsize):
+        return None
+
+      assert not fortran_order, "Data should always be C-ordered"
+      return np.frombuffer(array_bytes, dtype=dtype).reshape(shape)
+
+    for attempt in range(3):
+      log.debug("%d Read %s into domain %s", attempt, key, domain)
+      read_result = asyncio.run_coroutine_threadsafe(
+        key_reader(http_store, key), AsyncLoopSingleton().instance
+      ).result()
+
+      if (data := read_array(read_result.value)) is not None:
+        log.debug("Completed read %s into domain %s", key, domain)
+        break
+
+    # Couldn't read a reasonable value, bail out
+    if data is None:
+      array[...] = missing_value
+      return read_result.stamp
 
     # TODO: Improve the efficiency of this
     # 1. Use numba to do it (as in katdal)
@@ -126,14 +156,14 @@ def virtual_chunked_store(
     # 3. Wait for tensorstore to implement kvstore reshape
     if corrprods_transpose:
       data = (
-        data[..., cp_argsort].reshape(shape[:2] + (nbl, npol)).transpose(0, 2, 1, 3)
+        data[..., cp_argsort].reshape(data.shape[:2] + (nbl, npol)).transpose(0, 2, 1, 3)
       )
 
     assert array.shape == data.shape
 
     chunk_domain = domain.translate_backward_by[domain.origin]
-    tensor_data = ts.array(data)
-    array[...] = tensor_data[chunk_domain]
+    #tensor_data = ts.array(data)
+    array[...] = data[chunk_domain.index_exp]
     return read_result.stamp
 
   return ts.virtual_chunked(
@@ -164,17 +194,18 @@ class StoreFactory:
 
     virtual_store_spec = ts.Context.Spec({"data_copy_concurrency": {"limit": 12}})
     virtual_store_context = ts.Context(virtual_store_spec)
-
     tensorstores = {}
 
     for data_type, data_schema in chunk_info.items():
       dim_labels = DATA_TYPE_LABELS[data_type]
+      missing_value = MISSING_VALUES[data_type]
       store = virtual_chunked_store(
         http_store,
         data_type,
         data_schema,
         cp_argsort,
         dim_labels,
+        missing_value,
         virtual_store_context,
       )
       tensorstores[data_type] = store
