@@ -1,6 +1,6 @@
 import asyncio
-from functools import reduce
 import logging
+from functools import reduce
 from io import BytesIO
 from operator import mul
 from typing import Any, Collection, Dict, Tuple
@@ -18,26 +18,18 @@ MISSING_VALUES = {
   "correlator_data": np.nan + np.nan * 1j,
   "flags": 1,
   "weights": 0,
-  "weights_channel": 0.0
+  "weights_channel": 0.0,
 }
 DATA_TYPE_LABELS = {
-  "correlator_data": (
-    ("time", "frequency", "corrprod"),
-    ("time", "baseline_id", "frequency", "polarization"),
-  ),
-  "flags": (
-    ("time", "frequency", "corrprod"),
-    ("time", "baseline_id", "frequency", "polarization"),
-  ),
-  "weights": (
-    ("time", "frequency", "corrprod"),
-    ("time", "baseline_id", "frequency", "polarization"),
-  ),
-  "weights_channel": (("time", "frequency"), ("time", "frequency")),
+  "correlator_data": ("time", "frequency", "corrprod"),
+  "flags": ("time", "frequency", "corrprod"),
+  "weights": ("time", "frequency", "corrprod"),
+  "weights_channel": ("time", "frequency"),
 }
 
 
 log = logging.getLogger(__name__)
+
 
 def http_spec_factory(endpoint: str, token: str | None) -> Dict[str, Collection[str]]:
   spec: Dict[str, Collection[str]] = {
@@ -55,8 +47,7 @@ def virtual_chunked_store(
   http_store: ts.KvStore,
   data_type: str,
   data_schema: Dict[str, Any],
-  cp_argsort: npt.NDArray,
-  dim_labels: Tuple[Tuple[str, ...], Tuple[str, ...]],
+  dim_labels: Tuple[str, ...],
   missing_value: Any,
   context: ts.Context,
 ) -> ts.KvStore:
@@ -67,29 +58,8 @@ def virtual_chunked_store(
   if not all(all(dc[0] == c for c in dc[1:-1]) for dc in chunks):
     raise ValueError(f"{chunks} are not homogenous")
 
-  source_labels, dest_labels = dim_labels
-
-  # Rework the domain shape and chunks if we have
-  # corrprods to reflect the transpose inside read_chunk
-  if corrprods_transpose := (source_labels == ("time", "frequency", "corrprod")):
-    if len(cp_argsort) % len(FULL_POLARIZATIONS) != 0:
-      raise ValueError(
-        f"corrprod {len(cp_argsort)} is not a multiple "
-        f"of polarizations {len(FULL_POLARIZATIONS)}"
-      )
-
-    ncp = shape[-1]
-    assert chunks[-1] == (ncp,), f"corrprod chunks {chunks[-1]} != {ncp}"
-    nbl = ncp // len(FULL_POLARIZATIONS)
-    npol = len(FULL_POLARIZATIONS)
-    chunks = (chunks[0], (nbl,), chunks[1], (npol,))
-    shape = tuple(sum(dc) for dc in chunks)
-
-  time_index = dest_labels.index("time")
-  freq_index = dest_labels.index("frequency")
-
   domain = ts.IndexDomain(
-    [ts.Dim(size=s, label=ll) for s, ll in zip(shape, dest_labels)]
+    [ts.Dim(size=s, label=ll) for s, ll in zip(shape, dim_labels)]
   )
   chunk_layout = ts.ChunkLayout(chunk_shape=[c[0] for c in chunks])
 
@@ -98,17 +68,14 @@ def virtual_chunked_store(
   ) -> ts.KvStore.TimestampedStorageGeneration:
     """Reads the MeerKAT archive npy file associated with the domain,
     strips off the header and then assigns the resulting data
-    into array"""
+    into array
+    {cbid}/correlator-data/00000_00000_00000.npy
+    {cbid}/correlator-data/00001_00000_00000.npy
+    {cbid}/correlator-data/00000_00032_00000.npy
+    {cbid}/flags/00000_00032_00000.npy
 
-    # Hacky calculation of the key for the corrprod case
-    # assumes a single corrprod chunk (which seems to be the case)
-    if corrprods_transpose:
-      key_parts = [f"{domain.origin[i]:05}" for i in (time_index, freq_index)] + [
-        f"{0:05}"
-      ]
-    else:
-      key_parts = [f"{o:05}" for o in domain.origin]
-
+    """
+    key_parts = [f"{o:05}" for o in domain.origin]
     key = f"{prefix}/{data_type}/{'_'.join(key_parts)}.npy"
 
     async def key_reader(store, key):
@@ -123,13 +90,17 @@ def virtual_chunked_store(
       fp = BytesIO(raw_bytes)
       try:
         version = read_magic(fp)
-        read_header = read_array_header_1_0 if version == (1, 0) else read_array_header_2_0
+        read_header = (
+          read_array_header_1_0 if version == (1, 0) else read_array_header_2_0
+        )
         shape, fortran_order, dtype = read_header(fp)
       except ValueError:
         return None
 
       # Are there enough bytes for a reconstruction?
-      if len(array_bytes := raw_bytes[fp.tell():]) != reduce(mul, shape, dtype.itemsize):
+      if len(array_bytes := raw_bytes[fp.tell() :]) != reduce(
+        mul, shape, dtype.itemsize
+      ):
         return None
 
       assert not fortran_order, "Data should always be C-ordered"
@@ -147,22 +118,13 @@ def virtual_chunked_store(
 
     # Couldn't read a reasonable value, bail out
     if data is None:
+      log.warning("Substituting %s for truncated key %s", missing_value, key)
       array[...] = missing_value
       return read_result.stamp
-
-    # TODO: Improve the efficiency of this
-    # 1. Use numba to do it (as in katdal)
-    # 2. Build a C++ wheel to do it
-    # 3. Wait for tensorstore to implement kvstore reshape
-    if corrprods_transpose:
-      data = (
-        data[..., cp_argsort].reshape(data.shape[:2] + (nbl, npol)).transpose(0, 2, 1, 3)
-      )
 
     assert array.shape == data.shape
 
     chunk_domain = domain.translate_backward_by[domain.origin]
-    #tensor_data = ts.array(data)
     array[...] = data[chunk_domain.index_exp]
     return read_result.stamp
 
@@ -185,10 +147,6 @@ class StoreFactory:
       endpoint.startswith("https") and isinstance(token, str)
     ) or endpoint.startswith("http")
     chunk_info = telstate["chunk_info"]
-    corrprods = telstate["bls_ordering"]
-    cp_argsort = np.array(
-      sorted(range(len(corrprods)), key=lambda i: tuple(corrprods[i]))
-    )
     http_store_spec = http_spec_factory(endpoint, token)
     http_store = ts.KvStore.open(http_store_spec).result()
 
@@ -197,15 +155,12 @@ class StoreFactory:
     tensorstores = {}
 
     for data_type, data_schema in chunk_info.items():
-      dim_labels = DATA_TYPE_LABELS[data_type]
-      missing_value = MISSING_VALUES[data_type]
       store = virtual_chunked_store(
         http_store,
         data_type,
         data_schema,
-        cp_argsort,
-        dim_labels,
-        missing_value,
+        DATA_TYPE_LABELS[data_type],
+        MISSING_VALUES[data_type],
         virtual_store_context,
       )
       tensorstores[data_type] = store
