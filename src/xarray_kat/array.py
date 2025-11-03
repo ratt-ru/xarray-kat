@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from numbers import Integral
-from typing import Tuple
+from typing import TYPE_CHECKING, Tuple
 
 import numpy as np
 import numpy.typing as npt
@@ -9,6 +11,10 @@ from xarray.core.indexing import (
   IndexingSupport,
   explicit_indexing_adapter,
 )
+
+if TYPE_CHECKING:
+  from xarray_kat.meerkat_store_provider import MeerkatStoreProvider
+
 
 class TensorstoreArray(BackendArray):
   """Wraps a tensorstore"""
@@ -124,17 +130,19 @@ class CorrProductTensorstore(BackendArray, CorrProductMixin):
   ``(time, baseline_id, frequency, polarization)`` form.
   """
 
-  __slots__ = "_store"
+  __slots__ = "_store_provider"
 
-  _store: ts.TensorStore
+  _store_provider: MeerkatStoreProvider
 
-  def __init__(self, store: ts.TensorStore, cp_argsort: npt.NDArray, npol: int):
-    CorrProductMixin.__init__(self, store.shape, cp_argsort, npol)
-    self._store = store
+  def __init__(
+    self, store_provider: MeerkatStoreProvider, cp_argsort: npt.NDArray, npol: int
+  ):
+    CorrProductMixin.__init__(self, store_provider.store.shape, cp_argsort, npol)
+    self._store_provider = store_provider
 
   @property
   def dtype(self) -> npt.DTypeLike:
-    return np.dtype(self._store.dtype.type)
+    return np.dtype(self._store_provider.store.dtype.type)
 
   def __getitem__(self, key) -> npt.NDArray:
     return explicit_indexing_adapter(
@@ -142,4 +150,56 @@ class CorrProductTensorstore(BackendArray, CorrProductMixin):
     )
 
   def _getitem(self, key) -> npt.NDArray:
-    return self._store[self.meerkat_key(key)].transpose((0, 2, 1, 3)).read().result()
+    return (
+      self._store_provider.store[self.meerkat_key(key)]
+      .transpose((0, 2, 1, 3))
+      .read()
+      .result()
+    )
+
+
+class WeightArray(BackendArray, CorrProductMixin):
+  """ Combines weights and channel_weights to present a unified
+  WEIGHTS array in the xarray layer
+  """
+  _int_weight_prov: MeerkatStoreProvider
+  _channel_weight_prov: MeerkatStoreProvider
+  _cp_argsort: npt.NDArray
+  _npol: int
+
+  def __init__(
+    self,
+    int_weight_prov: MeerkatStoreProvider,
+    channel_weight_prov: MeerkatStoreProvider,
+    cp_argsort: npt.NDArray,
+    npol: int,
+  ):
+    # Integer weights have a (time, frequency, corrprod) shape
+    CorrProductMixin.__init__(self, int_weight_prov.store.shape, cp_argsort, npol)
+    self._int_weight_prov = int_weight_prov
+    self._channel_weight_prov = channel_weight_prov
+    self._cp_argsort = cp_argsort
+    self._npol = npol
+
+  @property
+  def dtype(self) -> npt.DTypeLike:
+    return np.dtype(self._channel_weight_prov.store.dtype.type)
+
+  def __getitem__(self, key) -> npt.NDArray:
+    return explicit_indexing_adapter(
+      key, self.shape, IndexingSupport.OUTER, self._getitem
+    )
+
+  def _getitem(self, key) -> npt.NDArray:
+    corrprod_key = self.meerkat_key(key)
+    chan_weight_key = (corrprod_key[0], None, corrprod_key[1], None)
+    chan_weight_store = self._channel_weight_prov.store[chan_weight_key]
+    int_weight_store = ts.cast(
+      self._int_weight_prov.store[corrprod_key].transpose((0, 2, 1, 3)),
+      chan_weight_store.dtype,
+    )
+
+    # Issue reads at the same time, then await their completion
+    int_weight_fut = int_weight_store.read()
+    chan_weight_fut = chan_weight_store.read()
+    return int_weight_fut.result() * chan_weight_fut.result()

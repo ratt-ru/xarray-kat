@@ -7,8 +7,8 @@ import xarray
 from katsdptelstate import TelescopeState
 from xarray.core.indexing import LazilyIndexedArray
 
-from xarray_kat.array import CorrProductTensorstore
-from xarray_kat.tensorstore_factory import StoreFactory
+from xarray_kat.array import CorrProductTensorstore, WeightArray
+from xarray_kat.meerkat_store_provider import MeerkatStoreProvider
 
 CORRPROD_REGEX = re.compile(
   r"(?P<dish>[mMsSeE])(?P<number>\d+)(?P<polarization>[hHvV])"
@@ -107,7 +107,8 @@ class GroupFactory:
     ant2_names = np.array(cp_ant2_names[:: len(upols)], dtype=str)
     pols = np.array([HV_TO_LINEAR_MAP[p] for p in cp_pols[: len(upols)]], dtype=str)
 
-    stores = StoreFactory.make(telstate, endpoint, token)
+    chunk_info = telstate["chunk_info"]
+
     data_vars: Dict[str, xarray.Variable] = {}
 
     meerkat_to_msv4_name = {
@@ -116,18 +117,41 @@ class GroupFactory:
       "weights": "WEIGHT",
     }
 
-    for mk_name, msv4_name in meerkat_to_msv4_name.items():
-      ts_store = stores[mk_name]
-      time_dim, freq_dim = ts_store.domain.labels[:2]
+    def _make_corrprod_var(data_type: str):
+      store_provider = MeerkatStoreProvider(
+        data_type, chunk_info[data_type], endpoint, token, None, None
+      )
+      time_dim, freq_dim = store_provider.store.domain.labels[:2]
       dims = (time_dim, "baseline_id", freq_dim, "polarization")
-      time_chunks, freq_chunks = ts_store.chunk_layout.read_chunk.shape[:2]
+      time_chunks, freq_chunks = store_provider.store.chunk_layout.read_chunk.shape[:2]
       chunks = (time_chunks, len(ant1_names), freq_chunks, len(pols))
       array = LazilyIndexedArray(
-        CorrProductTensorstore(ts_store, cp_argsort, len(pols))
+        CorrProductTensorstore(store_provider, cp_argsort, len(pols))
       )
-      data_vars[msv4_name] = xarray.Variable(
+      return xarray.Variable(
         dims, array, None, {"preferred_chunks": dict(zip(dims, chunks))}
       )
+
+    data_vars["VISIBILITY"] = _make_corrprod_var("correlator_data")
+    data_vars["WEIGHT"] = _make_corrprod_var("weights")
+    data_vars["FLAG"] = _make_corrprod_var("flags")
+
+    int_weights_prov = MeerkatStoreProvider(
+      "weights", chunk_info["weights"], endpoint, token, None, None
+    )
+    weights_channel_prov = MeerkatStoreProvider(
+      "weights_channel", chunk_info["weights_channel"], endpoint, token, None, None
+    )
+    time_dim, freq_dim = int_weights_prov.store.domain.labels[:2]
+    dims = (time_dim, "baseline_id", freq_dim, "polarization")
+    time_chunks, freq_chunks = int_weights_prov.store.chunk_layout.read_chunk.shape[:2]
+    chunks = (time_chunks, len(ant1_names), freq_chunks, len(pols))
+    array = LazilyIndexedArray(
+      WeightArray(int_weights_prov, weights_channel_prov, cp_argsort, len(pols))
+    )
+    data_vars["WEIGHT"] = xarray.Variable(
+      dims, array, None, {"preferred_chunks": dict(zip(dims, chunks))}
+    )
 
     time_attrs = {
       "type": "time",
