@@ -16,33 +16,6 @@ if TYPE_CHECKING:
   from xarray_kat.meerkat_store_provider import MeerkatStoreProvider
 
 
-class TensorstoreArray(BackendArray):
-  """Wraps a tensorstore"""
-
-  __slots__ = ("_store",)
-
-  _store: ts.TensorStore
-
-  def __init__(self, store: ts.TensorStore):
-    self._store = store
-
-  @property
-  def shape(self):
-    return self._store.shape
-
-  @property
-  def dtype(self):
-    return np.dtype(self._store.dtype.type)
-
-  def __getitem__(self, key) -> npt.NDArray:
-    return explicit_indexing_adapter(
-      key, self.shape, IndexingSupport.OUTER, self._getitem
-    )
-
-  def _getitem(self, key) -> npt.NDArray:
-    return self._store[key].read().result()
-
-
 class CorrProductMixin:
   """Mixin containing methods for reasoning about
   ``(time, frequency, corrprod)`` shaped MeerKAT archive data."""
@@ -159,9 +132,8 @@ class CorrProductTensorstore(BackendArray, CorrProductMixin):
 
 
 class WeightArray(BackendArray, CorrProductMixin):
-  """ Combines weights and channel_weights to present a unified
-  WEIGHTS array in the xarray layer
-  """
+  """Combines weights and channel_weights to present a unified WEIGHT array"""
+
   _int_weight_prov: MeerkatStoreProvider
   _channel_weight_prov: MeerkatStoreProvider
   _cp_argsort: npt.NDArray
