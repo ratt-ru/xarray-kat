@@ -90,6 +90,7 @@ class GroupFactory:
 
     corrprods = telstate["bls_ordering"]
     baseline_pols = _corrprods_to_baseline_pols(corrprods)
+    assert len(corrprods) == len(baseline_pols)
     cp_argsort = np.array(
       sorted(range(len(baseline_pols)), key=lambda i: baseline_pols[i])
     )
@@ -117,10 +118,10 @@ class GroupFactory:
 
     for mk_name, msv4_name in meerkat_to_msv4_name.items():
       ts_store = stores[mk_name]
-      dims = ts_store.domain.labels[:2]
-      dims = (dims[0], "baseline_id", dims[1], "polarization")
-      tf_chunks = ts_store.chunk_layout.read_chunk.shape[:2]
-      chunks = (tf_chunks[0], len(ant1_names), tf_chunks[1], len(pols))
+      time_dim, freq_dim = ts_store.domain.labels[:2]
+      dims = (time_dim, "baseline_id", freq_dim, "polarization")
+      time_chunks, freq_chunks = ts_store.chunk_layout.read_chunk.shape[:2]
+      chunks = (time_chunks, len(ant1_names), freq_chunks, len(pols))
       array = LazilyIndexedArray(
         CorrProductTensorstore(ts_store, cp_argsort, len(pols))
       )
