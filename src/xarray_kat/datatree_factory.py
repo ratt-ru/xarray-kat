@@ -1,12 +1,57 @@
+import re
 from typing import Any, Dict
 
 import numpy as np
+import numpy.typing as npt
 import xarray
 from katsdptelstate import TelescopeState
 from xarray.core.indexing import LazilyIndexedArray
 
-from xarray_kat.array import TensorstoreArray
-from xarray_kat.tensorstore_factory import StoreFactory
+from xarray_kat.array import CorrProductTensorstore, WeightArray
+from xarray_kat.meerkat_store_provider import MeerkatStoreProvider
+
+CORRPROD_REGEX = re.compile(
+  r"(?P<dish>[mMsSeE])(?P<number>\d+)(?P<polarization>[hHvV])"
+)
+
+HV_TO_LINEAR_MAP = {
+  "hh": "XX",
+  "hv": "XY",
+  "vh": "YX",
+  "vv": "YY",
+}
+
+
+def _corrprods_to_baseline_pols(corrprods: npt.NDArray):
+  """Split correlation products of the form ``["m001v", "m002h"]`` into
+  tuples of the form ``(("m001", "m002"), "vh")``"""
+  result = []
+
+  for cp1, cp2 in corrprods:
+    if (
+      (cp1_match := re.match(CORRPROD_REGEX, cp1)) is None
+      or (cp1_dish := cp1_match.group("dish")) is None
+      or (cp1_nr := cp1_match.group("number")) is None
+      or (cp1_pol := cp1_match.group("polarization")) is None
+    ):
+      raise ValueError(f"{cp1} is not a valid correlation product string {cp1_match}")
+    if (
+      (cp2_match := re.match(CORRPROD_REGEX, cp2)) is None
+      or (cp2_dish := cp2_match.group("dish")) is None
+      or (cp2_nr := cp2_match.group("number")) is None
+      or (cp2_pol := cp2_match.group("polarization")) is None
+    ):
+      raise ValueError(f"{cp2} is not a valid correlation product string {cp2_match}")
+
+    result.append(
+      (
+        f"{cp1_dish.lower()}{cp1_nr}",
+        f"{cp2_dish.lower()}{cp2_nr}",
+        f"{cp1_pol.lower()}{cp2_pol.lower()}",
+      )
+    )
+
+  return result
 
 
 class GroupFactory:
@@ -17,18 +62,22 @@ class GroupFactory:
     capture_block_id = telstate["capture_block_id"]
     stream_name = telstate["stream_name"]
     chunk_info = telstate["chunk_info"]
-    start_time = telstate["sync_time"] + telstate["first_timestamp"]
-    integration_time = telstate["int_time"]
-    ntime = chunk_info["correlator_data"]["shape"][0]
 
+    # Time metadata
+    start_time = telstate["sync_time"] + telstate["first_timestamp"]
+    ntime = chunk_info["correlator_data"]["shape"][0]
+    integration_time = telstate["int_time"]
+    timestamps = start_time + np.arange(ntime) * integration_time
+
+    # Frequency metadata
     band = telstate["sub_band"]
     nchan = telstate["n_chans"]
     bandwidth = telstate["bandwidth"]
     center_freq = telstate["center_freq"]
     channel_width = bandwidth / nchan
-    timestamps = start_time + np.arange(ntime) * integration_time
     chan_freqs = (center_freq - (bandwidth / 2)) + np.arange(nchan) * channel_width
 
+    # Correlation Product metadata
     ant_names = []
 
     for resource in telstate["sub_pool_resources"].split(","):
@@ -39,28 +88,70 @@ class GroupFactory:
       except (KeyError, ValueError):
         continue
 
-    # TODO
-    # This should align with sorted corrprods,
-    # but we should be more accurate
-    ant_names = np.array(sorted(ant_names))
-    ant1, ant2 = np.triu_indices(len(ant_names), 0)
+    corrprods = telstate["bls_ordering"]
+    baseline_pols = _corrprods_to_baseline_pols(corrprods)
+    assert len(corrprods) == len(baseline_pols)
+    cp_argsort = np.array(
+      sorted(range(len(baseline_pols)), key=lambda i: baseline_pols[i])
+    )
 
-    stores = StoreFactory.make(telstate, endpoint, token)
+    cp_ant1_names, cp_ant2_names, cp_pols = zip(*(baseline_pols[i] for i in cp_argsort))
+    upols = list(sorted(set(cp_pols)))
+    if len(baseline_pols) % len(upols) != 0:
+      raise ValueError(
+        f"Polarizations {len(upols)} don't divide "
+        f"correlation products {len(baseline_pols)} exactly"
+      )
+
+    ant1_names = np.array(cp_ant1_names[:: len(upols)], dtype=str)
+    ant2_names = np.array(cp_ant2_names[:: len(upols)], dtype=str)
+    pols = np.array([HV_TO_LINEAR_MAP[p] for p in cp_pols[: len(upols)]], dtype=str)
+
+    chunk_info = telstate["chunk_info"]
+
     data_vars: Dict[str, xarray.Variable] = {}
 
     meerkat_to_msv4_name = {
       "correlator_data": "VISIBILITY",
       "flags": "FLAG",
-      "weights": "WEIGHT"
+      "weights": "WEIGHT",
     }
 
-    for ts_name, msv4_name in meerkat_to_msv4_name.items():
-      tensorstore_array = stores[ts_name]
-      array = LazilyIndexedArray(TensorstoreArray(tensorstore_array))
-      dims = tensorstore_array.domain.labels
-      chunks = tensorstore_array.chunk_layout.read_chunk.shape
-      encoding = {"preferred_chunks": dict(zip(dims, chunks))}
-      data_vars[msv4_name] = xarray.Variable(dims, array, None, encoding)
+    def _make_corrprod_var(data_type: str):
+      store_provider = MeerkatStoreProvider(
+        data_type, chunk_info[data_type], endpoint, token, None, None
+      )
+      time_dim, freq_dim = store_provider.store.domain.labels[:2]
+      dims = (time_dim, "baseline_id", freq_dim, "polarization")
+      time_chunks, freq_chunks = store_provider.store.chunk_layout.read_chunk.shape[:2]
+      chunks = (time_chunks, len(ant1_names), freq_chunks, len(pols))
+      array = LazilyIndexedArray(
+        CorrProductTensorstore(store_provider, cp_argsort, len(pols))
+      )
+      return xarray.Variable(
+        dims, array, None, {"preferred_chunks": dict(zip(dims, chunks))}
+      )
+
+    data_vars["VISIBILITY"] = _make_corrprod_var("correlator_data")
+    data_vars["WEIGHT"] = _make_corrprod_var("weights")
+    data_vars["FLAG"] = _make_corrprod_var("flags")
+
+    int_weights_prov = MeerkatStoreProvider(
+      "weights", chunk_info["weights"], endpoint, token, None, None
+    )
+    weights_channel_prov = MeerkatStoreProvider(
+      "weights_channel", chunk_info["weights_channel"], endpoint, token, None, None
+    )
+    time_dim, freq_dim = int_weights_prov.store.domain.labels[:2]
+    dims = (time_dim, "baseline_id", freq_dim, "polarization")
+    time_chunks, freq_chunks = int_weights_prov.store.chunk_layout.read_chunk.shape[:2]
+    chunks = (time_chunks, len(ant1_names), freq_chunks, len(pols))
+    array = LazilyIndexedArray(
+      WeightArray(int_weights_prov, weights_channel_prov, cp_argsort, len(pols))
+    )
+    data_vars["WEIGHT"] = xarray.Variable(
+      dims, array, None, {"preferred_chunks": dict(zip(dims, chunks))}
+    )
 
     time_attrs = {
       "type": "time",
@@ -96,10 +187,10 @@ class GroupFactory:
       coords={
         "time": xarray.Variable("time", timestamps, time_attrs),
         "frequency": xarray.Variable("frequency", chan_freqs, freq_attrs),
-        "polarization": xarray.Variable("polarization", ["XX", "XY", "YX", "YY"]),
-        "baseline_id": xarray.Variable("baseline_id", np.arange(len(ant1))),
-        "baseline_antenna1_name": xarray.Variable("baseline_id", ant_names[ant1]),
-        "baseline_antenna2_name": xarray.Variable("baseline_id", ant_names[ant2]),
+        "polarization": xarray.Variable("polarization", pols),
+        "baseline_id": xarray.Variable("baseline_id", np.arange(len(ant1_names))),
+        "baseline_antenna1_name": xarray.Variable("baseline_id", ant1_names),
+        "baseline_antenna2_name": xarray.Variable("baseline_id", ant2_names),
       },
     )
 
