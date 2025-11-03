@@ -18,7 +18,13 @@ if TYPE_CHECKING:
 
 class CorrProductMixin:
   """Mixin containing methods for reasoning about
-  ``(time, frequency, corrprod)`` shaped MeerKAT archive data."""
+  ``(time, frequency, corrprod)`` shaped MeerKAT archive data.
+
+  In particular the ``meerkat_key`` method produces an index
+  that, when applied to a ``(time, frequency, corrprod)`` array
+  produces a ``(time, frequency, baseline_id, polarization)`` array.
+  This can then be transposed into canonical MSv4 ording
+  """
 
   __slots__ = ("_cp_argsort", "_msv4_shape")
 
@@ -93,6 +99,12 @@ class CorrProductMixin:
     cp_selection = self._cp_argsort[bl_grid * npol + pol_grid]
     return (time_selection, frequency_selection, cp_selection)
 
+  @property
+  def transpose_axes(self) -> Tuple[int, int, int, int]:
+    """Transpose (time, frequency, baseline_id, polarization) to
+    (time, baseline_id, frequency, polarization)"""
+    return (0, 2, 1, 3)
+
 
 class CorrProductTensorstore(BackendArray, CorrProductMixin):
   """Wraps a ``(time, frequency, corrprod)``` array.
@@ -125,7 +137,7 @@ class CorrProductTensorstore(BackendArray, CorrProductMixin):
   def _getitem(self, key) -> npt.NDArray:
     return (
       self._store_provider.store[self.meerkat_key(key)]
-      .transpose((0, 2, 1, 3))
+      .transpose(self.transpose_axes)
       .read()
       .result()
     )
@@ -167,7 +179,7 @@ class WeightArray(BackendArray, CorrProductMixin):
     chan_weight_key = (corrprod_key[0], None, corrprod_key[1], None)
     chan_weight_store = self._channel_weight_prov.store[chan_weight_key]
     int_weight_store = ts.cast(
-      self._int_weight_prov.store[corrprod_key].transpose((0, 2, 1, 3)),
+      self._int_weight_prov.store[corrprod_key].transpose(self.transpose_axes),
       chan_weight_store.dtype,
     )
 
