@@ -161,10 +161,9 @@ def virtual_chunked_store(
 class MeerkatStoreProvider:
   """Provides a tensorstore accessing MeerKAT chunk data.
 
-  This class exists because a ``tensorstore.virtual_chunked`` is used
-  to access this data and the underlying ``read_chunk`` method is not pickleable:
-  It is created as a closure capturing an underlying http tensorstore,
-  amongst other variables.
+  This pickleable class is necessary because a ``tensorstore.virtual_chunked``
+  tensorstore is used to access MeerKAT chunks and the underlying
+  ``read_chunk`` closure is not pickleable.
 
   Use as follows, for example:
 
