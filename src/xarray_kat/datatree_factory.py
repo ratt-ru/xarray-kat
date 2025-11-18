@@ -17,7 +17,7 @@ if TYPE_CHECKING:
   import tensorstore as ts
 
 MISSING_VALUES = {
-  "correlator_data": np.nan + np.nan * 1j,
+  "correlator_data": 0j,
   "flags": 1,
   "weights": 0,
   "weights_channel": 0.0,
