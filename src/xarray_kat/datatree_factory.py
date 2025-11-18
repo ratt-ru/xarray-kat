@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 import re
-from typing import Any, Dict
+from typing import TYPE_CHECKING, Any, Dict
 
 import numpy as np
 import numpy.typing as npt
@@ -7,8 +9,26 @@ import xarray
 from katsdptelstate import TelescopeState
 from xarray.core.indexing import LazilyIndexedArray
 
-from xarray_kat.array import CorrProductTensorstore, WeightArray
-from xarray_kat.meerkat_store_provider import MeerkatStoreProvider
+from xarray_kat.array import CorrProductArray, WeightArray
+from xarray_kat.meerkat_stores import http_store_factory, virtual_chunked_store
+from xarray_kat.multiton import Multiton
+
+if TYPE_CHECKING:
+  import tensorstore as ts
+
+MISSING_VALUES = {
+  "correlator_data": np.nan + np.nan * 1j,
+  "flags": 1,
+  "weights": 0,
+  "weights_channel": 0.0,
+}
+
+DATA_TYPE_LABELS = {
+  "correlator_data": ("time", "frequency", "corrprod"),
+  "flags": ("time", "frequency", "corrprod"),
+  "weights": ("time", "frequency", "corrprod"),
+  "weights_channel": ("time", "frequency"),
+}
 
 CORRPROD_REGEX = re.compile(
   r"(?P<dish>[mMsSeE])(?P<number>\d+)(?P<polarization>[hHvV])"
@@ -55,40 +75,64 @@ def _corrprods_to_baseline_pols(corrprods: npt.NDArray):
 
 
 class GroupFactory:
-  @classmethod
-  def make(
-    cls, telstate: TelescopeState, endpoint: str, token: str | None = None
-  ) -> Dict[str, Any]:
-    capture_block_id = telstate["capture_block_id"]
-    stream_name = telstate["stream_name"]
-    chunk_info = telstate["chunk_info"]
+  _telstate: TelescopeState
+  _endpoint: str
+  _token: str | None
+
+  def __init__(self, telstate: TelescopeState, endpoint: str, token: str | None = None):
+    self._telstate = telstate
+    self._endpoint = endpoint
+    self._token = token
+
+  def http_backed_store(self, data_type: str) -> Multiton[ts.TensorStore]:
+    """ Create a virtual chunked tensorstore backed by an http kvstore
+    that pulls data off the MeerKAT archive """
+    chunk_info = self._telstate["chunk_info"]
+    chunk_schema = chunk_info[data_type]
+    http_store = Multiton(
+      http_store_factory, self._endpoint, chunk_schema["prefix"], self._token, None
+    )
+    return Multiton(
+      virtual_chunked_store,
+      http_store,
+      data_type,
+      chunk_schema,
+      DATA_TYPE_LABELS[data_type],
+      MISSING_VALUES[data_type],
+      None,
+    )
+
+  def create(self) -> Dict[str, Any]:
+    capture_block_id = self._telstate["capture_block_id"]
+    stream_name = self._telstate["stream_name"]
+    chunk_info = self._telstate["chunk_info"]
 
     # Time metadata
-    start_time = telstate["sync_time"] + telstate["first_timestamp"]
+    start_time = self._telstate["sync_time"] + self._telstate["first_timestamp"]
     ntime = chunk_info["correlator_data"]["shape"][0]
-    integration_time = telstate["int_time"]
+    integration_time = self._telstate["int_time"]
     timestamps = start_time + np.arange(ntime) * integration_time
 
     # Frequency metadata
-    band = telstate["sub_band"]
-    nchan = telstate["n_chans"]
-    bandwidth = telstate["bandwidth"]
-    center_freq = telstate["center_freq"]
+    band = self._telstate["sub_band"]
+    nchan = self._telstate["n_chans"]
+    bandwidth = self._telstate["bandwidth"]
+    center_freq = self._telstate["center_freq"]
     channel_width = bandwidth / nchan
     chan_freqs = (center_freq - (bandwidth / 2)) + np.arange(nchan) * channel_width
 
     # Correlation Product metadata
     ant_names = []
 
-    for resource in telstate["sub_pool_resources"].split(","):
+    for resource in self._telstate["sub_pool_resources"].split(","):
       try:
-        ant_description = telstate[resource + "_observer"]
+        ant_description = self._telstate[resource + "_observer"]
         ant_name, _ = ant_description.split(",", maxsplit=1)
         ant_names.append(ant_name)
       except (KeyError, ValueError):
         continue
 
-    corrprods = telstate["bls_ordering"]
+    corrprods = self._telstate["bls_ordering"]
     baseline_pols = _corrprods_to_baseline_pols(corrprods)
     assert len(corrprods) == len(baseline_pols)
     cp_argsort = np.array(
@@ -107,52 +151,34 @@ class GroupFactory:
     ant2_names = np.array(cp_ant2_names[:: len(upols)], dtype=str)
     pols = np.array([HV_TO_LINEAR_MAP[p] for p in cp_pols[: len(upols)]], dtype=str)
 
-    chunk_info = telstate["chunk_info"]
+    vis_array = CorrProductArray(
+      self.http_backed_store("correlator_data"), cp_argsort, len(pols)
+    )
+    flag_array = CorrProductArray(
+      self.http_backed_store("flags"), cp_argsort, len(pols)
+    )
+    weight_array = WeightArray(
+      self.http_backed_store("weights"),
+      self.http_backed_store("weights_channel"),
+      cp_argsort,
+      len(pols),
+    )
 
-    data_vars: Dict[str, xarray.Variable] = {}
+    name_array_map = [
+      ("VISIBILITY", vis_array),
+      ("WEIGHT", weight_array),
+      ("FLAG", flag_array),
+    ]
 
-    meerkat_to_msv4_name = {
-      "correlator_data": "VISIBILITY",
-      "flags": "FLAG",
-      "weights": "WEIGHT",
+    data_vars = {
+      n: xarray.Variable(
+        a.dims,
+        LazilyIndexedArray(a),
+        None,
+        {"preferred_chunks": dict(zip(a.dims, a.chunks))},
+      )
+      for n, a in name_array_map
     }
-
-    def _make_corrprod_var(data_type: str):
-      store_provider = MeerkatStoreProvider(
-        data_type, chunk_info[data_type], endpoint, token, None, None
-      )
-      time_dim, freq_dim = store_provider.store.domain.labels[:2]
-      dims = (time_dim, "baseline_id", freq_dim, "polarization")
-      time_chunks, freq_chunks = store_provider.store.chunk_layout.read_chunk.shape[:2]
-      chunks = (time_chunks, len(ant1_names), freq_chunks, len(pols))
-      array = LazilyIndexedArray(
-        CorrProductTensorstore(store_provider, cp_argsort, len(pols))
-      )
-      return xarray.Variable(
-        dims, array, None, {"preferred_chunks": dict(zip(dims, chunks))}
-      )
-
-    data_vars["VISIBILITY"] = _make_corrprod_var("correlator_data")
-    data_vars["WEIGHT"] = _make_corrprod_var("weights")
-    data_vars["FLAG"] = _make_corrprod_var("flags")
-
-    int_weights_prov = MeerkatStoreProvider(
-      "weights", chunk_info["weights"], endpoint, token, None, None
-    )
-    weights_channel_prov = MeerkatStoreProvider(
-      "weights_channel", chunk_info["weights_channel"], endpoint, token, None, None
-    )
-    time_dim, freq_dim = int_weights_prov.store.domain.labels[:2]
-    dims = (time_dim, "baseline_id", freq_dim, "polarization")
-    time_chunks, freq_chunks = int_weights_prov.store.chunk_layout.read_chunk.shape[:2]
-    chunks = (time_chunks, len(ant1_names), freq_chunks, len(pols))
-    array = LazilyIndexedArray(
-      WeightArray(int_weights_prov, weights_channel_prov, cp_argsort, len(pols))
-    )
-    data_vars["WEIGHT"] = xarray.Variable(
-      dims, array, None, {"preferred_chunks": dict(zip(dims, chunks))}
-    )
-
     time_attrs = {
       "type": "time",
       "units": "s",
