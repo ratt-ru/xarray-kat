@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from numbers import Integral
 from typing import TYPE_CHECKING, Tuple
 
@@ -13,36 +14,69 @@ from xarray.core.indexing import (
 )
 
 if TYPE_CHECKING:
-  from xarray_kat.meerkat_store_provider import MeerkatStoreProvider
+  from xarray_kat.multiton import Multiton
+
+
+class AbstractMeerkatArchiveArray(ABC, BackendArray):
+  """Require subclasses to implement ``dims`` and ``chunks`` properties.
+  Note that xarray's internal API expects ``BackendArray``
+  to provide ``shape`` and ``dtype`` attributes."""
+
+  @property
+  @abstractmethod
+  def dims(self) -> Tuple[str, ...]:
+    raise NotImplementedError
+
+  @property
+  @abstractmethod
+  def chunks(self) -> Tuple[int, ...]:
+    raise NotImplementedError
 
 
 class CorrProductMixin:
   """Mixin containing methods for reasoning about
   ``(time, frequency, corrprod)`` shaped MeerKAT archive data.
 
-  In particular the ``meerkat_key`` method produces an index
+  Implements ``dims``, ``chunks`` and ``shape`` properties
+  of ``AbstractMeerkatArchiveArray``.
+
+  The ``meerkat_key`` method produces an index
   that, when applied to a ``(time, frequency, corrprod)`` array
   produces a ``(time, frequency, baseline_id, polarization)`` array.
-  This can then be transposed into canonical MSv4 ording
+  This can then be transposed into canonical MSv4 ording.
   """
 
-  __slots__ = ("_cp_argsort", "_msv4_shape")
+  __slots__ = ("_cp_argsort", "_msv4_shape", "_msv4_dims", "_msv4_chunks")
 
   _cp_argsort: npt.NDArray
   _msv4_shape: Tuple[int, int, int, int]
+  _msv4_dims: Tuple[str, str, str, str]
+  _msv4_chunks: Tuple[int, int, int, int]
 
   def __init__(
-    self, meerkat_shape: Tuple[int, int, int], cp_argsort: npt.NDArray, npol: int
+    self,
+    meerkat_shape: Tuple[int, int, int],
+    meerkat_dims: Tuple[str, str, str],
+    meerkat_chunks: Tuple[int, int, int],
+    cp_argsort: npt.NDArray,
+    npol: int,
   ):
     """Constructs a CorrProductMixin
 
     Args:
       meerkat_shape: The shape of the meerkat array.
-        It should be associated with the ``(time, frequency, corrprod)`` dimensions.
+        Should be associated with the ``(time, frequency, corrprod)`` dimensions.
+      meerkat_dims: The dimensions of the meerkat array.
+        Should be ``(time, frequency, corrprod)``.
+      meerkat_chunks: The chunking of the meerkat array.
+        Should be associated with the ``(time, frequency, corrprod)`` dimensions.
       cp_argsort: An array sorting the ``corrprod`` dimension into a
         canonical ``(baseline_id, polarization)`` ordering.
       npol: Number of polarizations.
     """
+    if meerkat_dims != ("time", "frequency", "corrprod"):
+      raise ValueError(f"{meerkat_dims} should be (time, frequency, corrprod)")
+
     try:
       ntime, nfreq, ncorrprod = meerkat_shape
     except ValueError:
@@ -52,6 +86,8 @@ class CorrProductMixin:
     self._cp_argsort = cp_argsort
     nbl, rem = divmod(len(cp_argsort), npol)
     self._msv4_shape = (ntime, nbl, nfreq, npol)
+    self._msv4_dims = (meerkat_dims[0], "baseline_id", meerkat_dims[1], "polarization")
+    self._msv4_chunks = (meerkat_chunks[0], nbl, meerkat_chunks[1], npol)
     if rem != 0:
       raise ValueError(
         f"Number of polarizations {npol} must divide "
@@ -59,7 +95,15 @@ class CorrProductMixin:
       )
 
   @property
-  def shape(self) -> Tuple[int, int, int, int]:
+  def dims(self) -> Tuple[str, ...]:
+    return self._msv4_dims
+
+  @property
+  def chunks(self) -> Tuple[int, ...]:
+    return self._msv4_chunks
+
+  @property
+  def shape(self) -> Tuple[int, ...]:
     return self._msv4_shape
 
   def _normalize_key_axis(
@@ -106,7 +150,7 @@ class CorrProductMixin:
     return (0, 2, 1, 3)
 
 
-class CorrProductTensorstore(BackendArray, CorrProductMixin):
+class CorrProductArray(CorrProductMixin, AbstractMeerkatArchiveArray):
   """Wraps a ``(time, frequency, corrprod)``` array.
 
   Most data in the MeerKAT archive has dimension
@@ -115,19 +159,26 @@ class CorrProductTensorstore(BackendArray, CorrProductMixin):
   ``(time, baseline_id, frequency, polarization)`` form.
   """
 
-  __slots__ = "_store_provider"
+  __slots__ = "_store"
 
-  _store_provider: MeerkatStoreProvider
+  _store: Multiton[ts.TensorStore]
 
   def __init__(
-    self, store_provider: MeerkatStoreProvider, cp_argsort: npt.NDArray, npol: int
+    self, store: Multiton[ts.TensorStore], cp_argsort: npt.NDArray, npol: int
   ):
-    CorrProductMixin.__init__(self, store_provider.store.shape, cp_argsort, npol)
-    self._store_provider = store_provider
+    CorrProductMixin.__init__(
+      self,
+      store.instance.shape,
+      store.instance.domain.labels,
+      store.instance.chunk_layout.read_chunk.shape,
+      cp_argsort,
+      npol,
+    )
+    self._store = store
 
   @property
   def dtype(self) -> npt.DTypeLike:
-    return np.dtype(self._store_provider.store.dtype.type)
+    return np.dtype(self._store.instance.dtype.type)
 
   def __getitem__(self, key) -> npt.NDArray:
     return explicit_indexing_adapter(
@@ -136,38 +187,45 @@ class CorrProductTensorstore(BackendArray, CorrProductMixin):
 
   def _getitem(self, key) -> npt.NDArray:
     return (
-      self._store_provider.store[self.meerkat_key(key)]
+      self._store.instance[self.meerkat_key(key)]
       .transpose(self.transpose_axes)
       .read()
       .result()
     )
 
 
-class WeightArray(BackendArray, CorrProductMixin):
+class WeightArray(CorrProductMixin, AbstractMeerkatArchiveArray):
   """Combines weights and channel_weights to present a unified WEIGHT array"""
 
-  _int_weight_prov: MeerkatStoreProvider
-  _channel_weight_prov: MeerkatStoreProvider
+  _int_weight_store: Multiton[ts.TensorStore]
+  _channel_weight_store: Multiton[ts.TensorStore]
   _cp_argsort: npt.NDArray
   _npol: int
 
   def __init__(
     self,
-    int_weight_prov: MeerkatStoreProvider,
-    channel_weight_prov: MeerkatStoreProvider,
+    int_weight_store: Multiton[ts.TensorStore],
+    channel_weight_store: Multiton[ts.TensorStore],
     cp_argsort: npt.NDArray,
     npol: int,
   ):
     # Integer weights have a (time, frequency, corrprod) shape
-    CorrProductMixin.__init__(self, int_weight_prov.store.shape, cp_argsort, npol)
-    self._int_weight_prov = int_weight_prov
-    self._channel_weight_prov = channel_weight_prov
+    CorrProductMixin.__init__(
+      self,
+      int_weight_store.instance.shape,
+      int_weight_store.instance.domain.labels,
+      int_weight_store.instance.chunk_layout.read_chunk.shape,
+      cp_argsort,
+      npol,
+    )
+    self._int_weight_store = int_weight_store
+    self._channel_weight_store = channel_weight_store
     self._cp_argsort = cp_argsort
     self._npol = npol
 
   @property
   def dtype(self) -> npt.DTypeLike:
-    return np.dtype(self._channel_weight_prov.store.dtype.type)
+    return np.dtype(self._channel_weight_store.instance.dtype.type)
 
   def __getitem__(self, key) -> npt.NDArray:
     return explicit_indexing_adapter(
@@ -177,9 +235,9 @@ class WeightArray(BackendArray, CorrProductMixin):
   def _getitem(self, key) -> npt.NDArray:
     corrprod_key = self.meerkat_key(key)
     chan_weight_key = (corrprod_key[0], None, corrprod_key[1], None)
-    chan_weight_store = self._channel_weight_prov.store[chan_weight_key]
+    chan_weight_store = self._channel_weight_store.instance[chan_weight_key]
     int_weight_store = ts.cast(
-      self._int_weight_prov.store[corrprod_key].transpose(self.transpose_axes),
+      self._int_weight_store.instance[corrprod_key].transpose(self.transpose_axes),
       chan_weight_store.dtype,
     )
 

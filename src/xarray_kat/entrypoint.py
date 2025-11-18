@@ -76,5 +76,6 @@ class KatEntryPoint(BackendEntrypoint):
       telstate = telstate_factory(response, capture_block_id, stream_name)
 
     endpoint = SplitResult(urlbits.scheme, urlbits.netloc, "", "", "").geturl()
-    groups = GroupFactory.make(telstate, endpoint, token)
+
+    groups = GroupFactory(telstate, endpoint, token).create()
     return groups
