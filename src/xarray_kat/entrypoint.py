@@ -14,8 +14,8 @@ if TYPE_CHECKING:
 
 
 from xarray_kat.datatree_factory import GroupFactory
-from xarray_kat.telstate import telstate_factory
-
+from xarray_kat.multiton import Multiton
+from xarray_kat.katdal_types import TelstateDataSource, sensor_cache_factory
 
 class KatStore(AbstractDataStore):
   """Store for reading from a MeerKAT data source"""
@@ -69,13 +69,9 @@ class KatEntryPoint(BackendEntrypoint):
     urlbits = urlsplit(url)
     assert urlbits.scheme in {"http", "https"}
 
-    qs = parse_qs(urlbits.query)
-    token = qs.get("token", [None])[0]
-
-    with urlopen(url) as response:
-      telstate = telstate_factory(response, capture_block_id, stream_name)
-
+    token = parse_qs(urlbits.query).get("token", [None])[0]
+    datasource = Multiton(TelstateDataSource.from_url, url, chunk_store=None)
+    sensor_cache = Multiton(sensor_cache_factory, datasource)
     endpoint = SplitResult(urlbits.scheme, urlbits.netloc, "", "", "").geturl()
-
-    groups = GroupFactory(telstate, endpoint, token).create()
-    return groups
+    group_factory = GroupFactory(datasource, sensor_cache, endpoint, token)
+    return group_factory.create()
