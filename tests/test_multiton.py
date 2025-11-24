@@ -49,3 +49,17 @@ def test_multiton_release():
   m1.release()
   gc.collect()
   assert len(Multiton._INSTANCE_CACHE) == 0
+
+
+def test_multiton_reentrant():
+  """Tests that """
+
+  def inner_factory(m: Multiton[Data]) -> Data:
+    return m.instance
+
+  def outer_factory(a: int, m: Multiton[Data]) -> Data:
+    return inner_factory(m)
+
+  om = Multiton(outer_factory, 2, Multiton(Data, 1.0, b=2.0))
+  assert om.instance.a == 1.0
+  assert om.instance.b == 2.0
