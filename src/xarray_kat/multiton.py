@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from threading import Lock
+from threading import RLock
 from typing import Any, Callable, ClassVar, Dict, Generic, Tuple, TypeVar
 from weakref import WeakValueDictionary
 
@@ -32,7 +32,7 @@ class Multiton(Generic[T]):
 
   # Class variables
   _INSTANCE_CACHE: ClassVar[WeakValueDictionary[FrozenKey, Any]] = WeakValueDictionary()
-  _INSTANCE_LOCK: Lock = Lock()
+  _INSTANCE_LOCK: RLock = RLock()
 
   __slots__ = ("_factory", "_args", "_kw", "_key", "_instance")
 
