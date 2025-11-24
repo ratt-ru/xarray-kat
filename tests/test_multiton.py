@@ -52,7 +52,7 @@ def test_multiton_release():
 
 
 def test_multiton_reentrant():
-  """Tests that """
+  """Tests that"""
 
   def inner_factory(m: Multiton[Data]) -> Data:
     return m.instance

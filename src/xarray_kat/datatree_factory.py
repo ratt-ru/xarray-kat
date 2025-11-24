@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Dict
 import numpy as np
 import numpy.typing as npt
 import xarray
-from katsdptelstate import TelescopeState
 from xarray.core.indexing import LazilyIndexedArray
 
 from xarray_kat.array import CorrProductArray, WeightArray
@@ -15,7 +14,8 @@ from xarray_kat.multiton import Multiton
 
 if TYPE_CHECKING:
   import tensorstore as ts
-  from xarray_kat.katdal_types import TelstateDataSource, SensorCache
+
+  from xarray_kat.katdal_types import SensorCache, TelstateDataSource
 
 MISSING_VALUES = {
   "correlator_data": 0j,
@@ -81,15 +81,21 @@ class GroupFactory:
   _endpoint: str
   _token: str | None
 
-  def __init__(self, datasource: Multiton[TelstateDataSource], sensor_cache: Multiton[SensorCache], endpoint: str, token: str | None = None):
+  def __init__(
+    self,
+    datasource: Multiton[TelstateDataSource],
+    sensor_cache: Multiton[SensorCache],
+    endpoint: str,
+    token: str | None = None,
+  ):
     self._datasource = datasource
     self._sensor_cache = sensor_cache
     self._endpoint = endpoint
     self._token = token
 
   def http_backed_store(self, data_type: str) -> Multiton[ts.TensorStore]:
-    """ Create a virtual chunked tensorstore backed by an http kvstore
-    that pulls data off the MeerKAT archive """
+    """Create a virtual chunked tensorstore backed by an http kvstore
+    that pulls data off the MeerKAT archive"""
     chunk_info = self._datasource.instance.telstate["chunk_info"]
     chunk_schema = chunk_info[data_type]
     http_store = Multiton(

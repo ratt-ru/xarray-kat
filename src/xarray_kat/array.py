@@ -32,6 +32,7 @@ class AbstractMeerkatArchiveArray(ABC, BackendArray):
   def chunks(self) -> Tuple[int, ...]:
     raise NotImplementedError
 
+
 class CorrProductMixin:
   """Mixin containing methods for reasoning about
   ``(time, frequency, corrprod)`` shaped MeerKAT archive data.
@@ -244,16 +245,3 @@ class WeightArray(CorrProductMixin, AbstractMeerkatArchiveArray):
     int_weight_fut = int_weight_store.read()
     chan_weight_fut = chan_weight_store.read()
     return int_weight_fut.result() * chan_weight_fut.result()
-
-
-class UvwArray(AbstractMeerkatArchiveArray):
-  def __init__(self):
-    pass
-
-  @property
-  def dims(self) -> Tuple[str, ...]:
-    return ("time", "baseline_id")
-
-  @property
-  def dtype(self) -> npt.DTypeLike:
-    return np.dtype(np.float64)

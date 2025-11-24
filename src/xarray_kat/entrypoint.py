@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING, Any, Dict, Iterable
 from urllib.parse import SplitResult, parse_qs, urlsplit
-from urllib.request import urlopen
 
 from xarray import DataTree
 from xarray.backends import BackendEntrypoint
@@ -14,8 +13,9 @@ if TYPE_CHECKING:
 
 
 from xarray_kat.datatree_factory import GroupFactory
-from xarray_kat.multiton import Multiton
 from xarray_kat.katdal_types import TelstateDataSource, sensor_cache_factory
+from xarray_kat.multiton import Multiton
+
 
 class KatStore(AbstractDataStore):
   """Store for reading from a MeerKAT data source"""
