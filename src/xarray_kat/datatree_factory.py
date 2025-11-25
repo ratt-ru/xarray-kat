@@ -145,6 +145,7 @@ class GroupFactory:
     end_utc = calendar.timegm(time.gmtime(timestamps[-1]))
     end_iso = datetime.fromtimestamp(end_utc, timezone.utc).isoformat()
     observer = telstate["obs_params"].get("observer", "unknown")
+    experiment_id = telstate["obs_params"].get("experiment_id", "unknown")
 
     # Frequency metadata
     band = telstate["sub_band"]
@@ -289,7 +290,7 @@ class GroupFactory:
           "description": f"Scan {scan_index} {STATE_PARTICIPLE_MAP[state]} {target.name}",
           "observation_info": {
             "observer": observer,
-            "project_uid": capture_block_id,
+            "project_uid": experiment_id,
             "release_date": end_iso,
           },
           "processor_info": {"sub_type": "MEERKAT", "type": "CORRELATOR"},
