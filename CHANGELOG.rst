@@ -3,6 +3,7 @@ Changelog
 
 X.Y.Z (DD-MM-YYY)
 -----------------
+* Convert slices into an immutable key value (:pr:`10`)
 * Vendor katdal telstate and SensorCache code (:pr:`9`)
 * Change Multiton instance lock to be re-entrant (:pr:`8`)
 * Zero missing correlator data (visibility) data (:pr:`7`)
