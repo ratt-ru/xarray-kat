@@ -24,7 +24,6 @@ from collections.abc import MutableMapping
 import katpoint
 import katsdptelstate
 import numpy as np
-import requests
 
 from xarray_kat.third_party.vendored.katdal.categorical import (
   ComparableArrayWrapper,
