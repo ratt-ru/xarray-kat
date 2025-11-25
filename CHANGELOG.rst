@@ -3,6 +3,7 @@ Changelog
 
 X.Y.Z (DD-MM-YYY)
 -----------------
+* Vendor katdal telstate and SensorCache code (:pr:`9`)
 * Change Multiton instance lock to be re-entrant (:pr:`8`)
 * Zero missing correlator data (visibility) data (:pr:`7`)
 * Refactor code base to use multitons for tensorstore http stores (:pr:`6`)

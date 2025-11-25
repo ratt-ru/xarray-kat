@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING, Dict
 
 import numpy as np
 import numpy.typing as npt
 import xarray
-from katsdptelstate import TelescopeState
 from xarray.core.indexing import LazilyIndexedArray
 
 from xarray_kat.array import CorrProductArray, WeightArray
@@ -15,6 +14,8 @@ from xarray_kat.multiton import Multiton
 
 if TYPE_CHECKING:
   import tensorstore as ts
+
+  from xarray_kat.katdal_types import SensorCache, TelstateDataSource
 
 MISSING_VALUES = {
   "correlator_data": 0j,
@@ -75,19 +76,27 @@ def _corrprods_to_baseline_pols(corrprods: npt.NDArray):
 
 
 class GroupFactory:
-  _telstate: TelescopeState
+  _datasource: Multiton[TelstateDataSource]
+  _sensor_cache: Multiton[SensorCache]
   _endpoint: str
   _token: str | None
 
-  def __init__(self, telstate: TelescopeState, endpoint: str, token: str | None = None):
-    self._telstate = telstate
+  def __init__(
+    self,
+    datasource: Multiton[TelstateDataSource],
+    sensor_cache: Multiton[SensorCache],
+    endpoint: str,
+    token: str | None = None,
+  ):
+    self._datasource = datasource
+    self._sensor_cache = sensor_cache
     self._endpoint = endpoint
     self._token = token
 
   def http_backed_store(self, data_type: str) -> Multiton[ts.TensorStore]:
-    """ Create a virtual chunked tensorstore backed by an http kvstore
-    that pulls data off the MeerKAT archive """
-    chunk_info = self._telstate["chunk_info"]
+    """Create a virtual chunked tensorstore backed by an http kvstore
+    that pulls data off the MeerKAT archive"""
+    chunk_info = self._datasource.instance.telstate["chunk_info"]
     chunk_schema = chunk_info[data_type]
     http_store = Multiton(
       http_store_factory, self._endpoint, chunk_schema["prefix"], self._token, None
@@ -102,37 +111,38 @@ class GroupFactory:
       None,
     )
 
-  def create(self) -> Dict[str, Any]:
-    capture_block_id = self._telstate["capture_block_id"]
-    stream_name = self._telstate["stream_name"]
-    chunk_info = self._telstate["chunk_info"]
+  def create(self) -> Dict[str, xarray.Dataset]:
+    telstate = self._datasource.instance.telstate
+    capture_block_id = telstate["capture_block_id"]
+    stream_name = telstate["stream_name"]
+    chunk_info = telstate["chunk_info"]
 
     # Time metadata
-    start_time = self._telstate["sync_time"] + self._telstate["first_timestamp"]
+    start_time = telstate["sync_time"] + telstate["first_timestamp"]
     ntime = chunk_info["correlator_data"]["shape"][0]
-    integration_time = self._telstate["int_time"]
+    integration_time = telstate["int_time"]
     timestamps = start_time + np.arange(ntime) * integration_time
 
     # Frequency metadata
-    band = self._telstate["sub_band"]
-    nchan = self._telstate["n_chans"]
-    bandwidth = self._telstate["bandwidth"]
-    center_freq = self._telstate["center_freq"]
+    band = telstate["sub_band"]
+    nchan = telstate["n_chans"]
+    bandwidth = telstate["bandwidth"]
+    center_freq = telstate["center_freq"]
     channel_width = bandwidth / nchan
     chan_freqs = (center_freq - (bandwidth / 2)) + np.arange(nchan) * channel_width
 
     # Correlation Product metadata
     ant_names = []
 
-    for resource in self._telstate["sub_pool_resources"].split(","):
+    for resource in telstate["sub_pool_resources"].split(","):
       try:
-        ant_description = self._telstate[resource + "_observer"]
+        ant_description = telstate[resource + "_observer"]
         ant_name, _ = ant_description.split(",", maxsplit=1)
         ant_names.append(ant_name)
       except (KeyError, ValueError):
         continue
 
-    corrprods = self._telstate["bls_ordering"]
+    corrprods = telstate["bls_ordering"]
     baseline_pols = _corrprods_to_baseline_pols(corrprods)
     assert len(corrprods) == len(baseline_pols)
     cp_argsort = np.array(
