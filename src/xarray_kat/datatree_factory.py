@@ -293,6 +293,7 @@ class GroupFactory:
             "project_uid": experiment_id,
             "release_date": end_iso,
           },
+          "schema_version": "4.0.0",
           "processor_info": {"sub_type": "MEERKAT", "type": "CORRELATOR"},
           "type": "visibility",
         },
