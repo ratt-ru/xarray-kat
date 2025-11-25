@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import calendar
 import re
+import time
+from datetime import datetime, timezone
+from importlib.metadata import version as importlib_version
 from typing import TYPE_CHECKING, Dict
 
 import numpy as np
@@ -42,6 +46,13 @@ HV_TO_LINEAR_MAP = {
   "vv": "YY",
 }
 
+# Map scan states to particples
+STATE_PARTICIPLE_MAP = {
+  "scan": "scanning",
+  "slew": "slewing towards",
+  "track": "tracking",
+}
+
 
 def _corrprods_to_baseline_pols(corrprods: npt.NDArray):
   """Split correlation products of the form ``["m001v", "m002h"]`` into
@@ -73,6 +84,11 @@ def _corrprods_to_baseline_pols(corrprods: npt.NDArray):
     )
 
   return result
+
+
+def _index_store(store: Multiton[ts.TensorStore], index) -> ts.TensorStore:
+  """Helper function for delaying indexing of a TensorStore held by a Multiton"""
+  return store.instance[index]
 
 
 class GroupFactory:
@@ -123,6 +139,13 @@ class GroupFactory:
     integration_time = telstate["int_time"]
     timestamps = start_time + np.arange(ntime) * integration_time
 
+    # Observation information
+    start_utc = calendar.timegm(time.gmtime(timestamps[0]))
+    start_iso = datetime.fromtimestamp(start_utc, timezone.utc).isoformat()
+    end_utc = calendar.timegm(time.gmtime(timestamps[-1]))
+    end_iso = datetime.fromtimestamp(end_utc, timezone.utc).isoformat()
+    observer = telstate["obs_params"].get("observer", "unknown")
+
     # Frequency metadata
     band = telstate["sub_band"]
     nchan = telstate["n_chans"]
@@ -161,73 +184,119 @@ class GroupFactory:
     ant2_names = np.array(cp_ant2_names[:: len(upols)], dtype=str)
     pols = np.array([HV_TO_LINEAR_MAP[p] for p in cp_pols[: len(upols)]], dtype=str)
 
-    vis_array = CorrProductArray(
-      self.http_backed_store("correlator_data"), cp_argsort, len(pols)
-    )
-    flag_array = CorrProductArray(
-      self.http_backed_store("flags"), cp_argsort, len(pols)
-    )
-    weight_array = WeightArray(
-      self.http_backed_store("weights"),
-      self.http_backed_store("weights_channel"),
-      cp_argsort,
-      len(pols),
-    )
+    corr_data_store = self.http_backed_store("correlator_data")
+    flag_store = self.http_backed_store("flags")
+    weight_store = self.http_backed_store("weights")
+    weight_channel_store = self.http_backed_store("weights_channel")
 
-    name_array_map = [
-      ("VISIBILITY", vis_array),
-      ("WEIGHT", weight_array),
-      ("FLAG", flag_array),
-    ]
+    sensor_cache = self._sensor_cache.instance
+    targets = sensor_cache["Observation/target"]
+    scan_indices = sensor_cache["Observation/scan_index"]
+    scan_states = sensor_cache["Observation/scan_state"]
 
-    data_vars = {
-      n: xarray.Variable(
-        a.dims,
-        LazilyIndexedArray(a),
-        None,
-        {"preferred_chunks": dict(zip(a.dims, a.chunks))},
+    unique_scans, scan_inv = np.unique(scan_indices, return_inverse=True)
+
+    tree: Dict[str, xarray.Dataset] = {}
+
+    for i, scan_index in enumerate(unique_scans):
+      mask = scan_inv == i
+      target = next(iter(targets[mask]))
+      state = next(iter(scan_states[mask]))
+      if np.all(np.diff(mask_index := np.where(mask)[0]) == 1):
+        mask_index = slice(mask_index[0], mask_index[-1] + 1)
+
+      vis_array = CorrProductArray(
+        Multiton(_index_store, corr_data_store, mask_index), cp_argsort, len(pols)
       )
-      for n, a in name_array_map
-    }
-    time_attrs = {
-      "type": "time",
-      "units": "s",
-      "scale": "utc",
-      "format": "unix",
-      "integration_time": {
-        "attrs": {"type": "quanitity", "units": "s"},
-        "data": integration_time,
-      },
-    }
 
-    freq_attrs = {
-      "type": "spectral_coord",
-      "observer": "TOPO",
-      "units": "Hz",
-      "spectral_window_name": f"{band}-band",
-      "frequency_group_name": "none",
-      "reference_frequency": {
-        "attrs": {"type": "spectral_coord", "observer": "TOPO", "units": "Hz"},
-        # TODO(sjperkins): Confirm this
-        "data": center_freq,
-      },
-      "channel_width": {
-        "attrs": {"type": "quantity", "units": "Hz"},
-        "data": channel_width,
-      },
-      "effective_channel_width": "EFFECTIVE_CHANNEL_WIDTH",
-    }
+      flag_array = CorrProductArray(
+        Multiton(_index_store, flag_store, mask_index), cp_argsort, len(pols)
+      )
 
-    ds = xarray.Dataset(
-      data_vars=data_vars,
-      coords={
-        "time": xarray.Variable("time", timestamps, time_attrs),
-        "frequency": xarray.Variable("frequency", chan_freqs, freq_attrs),
-        "polarization": xarray.Variable("polarization", pols),
-        "baseline_id": xarray.Variable("baseline_id", np.arange(len(ant1_names))),
-        "baseline_antenna1_name": xarray.Variable("baseline_id", ant1_names),
-        "baseline_antenna2_name": xarray.Variable("baseline_id", ant2_names),
-      },
-    )
+      weight_array = WeightArray(
+        Multiton(_index_store, weight_store, mask_index),
+        Multiton(_index_store, weight_channel_store, mask_index),
+        cp_argsort,
+        len(pols),
+      )
 
-    return {f"{capture_block_id}_{stream_name}": ds}
+      name_array_map = [
+        ("VISIBILITY", vis_array),
+        ("WEIGHT", weight_array),
+        ("FLAG", flag_array),
+      ]
+
+      data_vars = {
+        n: xarray.Variable(
+          a.dims,
+          LazilyIndexedArray(a),
+          None,
+          {"preferred_chunks": dict(zip(a.dims, a.chunks))},
+        )
+        for n, a in name_array_map
+      }
+      time_attrs = {
+        "type": "time",
+        "units": "s",
+        "scale": "utc",
+        "format": "unix",
+        "integration_time": {
+          "attrs": {"type": "quanitity", "units": "s"},
+          "data": integration_time,
+        },
+      }
+
+      freq_attrs = {
+        "type": "spectral_coord",
+        "observer": "TOPO",
+        "units": "Hz",
+        "spectral_window_name": f"{band}-band",
+        "frequency_group_name": "none",
+        "reference_frequency": {
+          "attrs": {"type": "spectral_coord", "observer": "TOPO", "units": "Hz"},
+          # TODO(sjperkins): Confirm this
+          "data": center_freq,
+        },
+        "channel_width": {
+          "attrs": {"type": "quantity", "units": "Hz"},
+          "data": channel_width,
+        },
+        "effective_channel_width": "EFFECTIVE_CHANNEL_WIDTH",
+      }
+
+      scan_timestamps = timestamps[mask_index]
+
+      ds = xarray.Dataset(
+        data_vars=data_vars,
+        coords={
+          "time": xarray.Variable("time", scan_timestamps, time_attrs),
+          "field_name": xarray.Variable("time", [target.name] * len(scan_timestamps)),
+          "scan_name": xarray.Variable(
+            "time", [str(scan_index)] * len(scan_timestamps)
+          ),
+          "frequency": xarray.Variable("frequency", chan_freqs, freq_attrs),
+          "polarization": xarray.Variable("polarization", pols),
+          "baseline_id": xarray.Variable("baseline_id", np.arange(len(ant1_names))),
+          "baseline_antenna1_name": xarray.Variable("baseline_id", ant1_names),
+          "baseline_antenna2_name": xarray.Variable("baseline_id", ant2_names),
+        },
+        attrs={
+          "creation_date": start_iso,
+          "creator": {
+            "software_name": "xarray-kat",
+            "version": importlib_version("xarray-kat"),
+          },
+          "description": f"Scan {scan_index} {STATE_PARTICIPLE_MAP[state]} {target.name}",
+          "observation_info": {
+            "observer": observer,
+            "project_uid": capture_block_id,
+            "release_date": end_iso,
+          },
+          "processor_info": {"sub_type": "MEERKAT", "type": "CORRELATOR"},
+          "type": "visibility",
+        },
+      )
+
+      tree[f"{capture_block_id}_{stream_name}_{i:03d}"] = ds
+
+    return tree
