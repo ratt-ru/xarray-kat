@@ -11,7 +11,9 @@ def freeze(arg: Any) -> Any:
     # str and bytes are sequences, return early to avoid tuplification
     return arg
 
-  if isinstance(arg, Sequence):
+  if isinstance(arg, slice):
+    return (arg.start, arg.stop, arg.step)
+  elif isinstance(arg, Sequence):
     return tuple(map(freeze, arg))
   elif isinstance(arg, Set):
     return frozenset(map(freeze, arg))
