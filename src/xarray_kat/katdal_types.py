@@ -7,4 +7,8 @@ from xarray_kat.third_party.vendored.katdal.visdatav4_minimal import VisibilityD
 
 
 def sensor_cache_factory(datasource: Multiton[TelstateDataSource]) -> SensorCache:
+  """ katdal Dataset code generates the sensor cache.
+
+  Call the constructor and appropriate the sensors.
+  """
   return VisibilityDataV4(datasource.instance).sensor
