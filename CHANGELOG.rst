@@ -4,6 +4,7 @@ Changelog
 X.Y.Z (DD-MM-YYY)
 -----------------
 * Add missing katpoint dependency (:pr:`13`)
+* Split MeerKAT observations by scan (:pr:`11`)
 * Convert slices into an immutable key value (:pr:`10`)
 * Vendor katdal telstate and SensorCache code (:pr:`9`)
 * Change Multiton instance lock to be re-entrant (:pr:`8`)
