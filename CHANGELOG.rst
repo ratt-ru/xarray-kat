@@ -3,6 +3,7 @@ Changelog
 
 X.Y.Z (DD-MM-YYY)
 -----------------
+* Add missing SensorGetter import (:pr:`17`)
 * Correct typo in README (:pr:`14`)
 * Add missing katpoint dependency (:pr:`13`)
 * Split MeerKAT observations by scan (:pr:`11`)
