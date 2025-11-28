@@ -3,6 +3,7 @@ Changelog
 
 X.Y.Z (DD-MM-YYY)
 -----------------
+* Pass ``capture_block_id`` and ``stream_name`` to ``TelstateDataSource.from_url`` (:pr:`18`)
 * Add missing SensorGetter import (:pr:`17`)
 * Correct typo in README (:pr:`14`)
 * Add missing katpoint dependency (:pr:`13`)
