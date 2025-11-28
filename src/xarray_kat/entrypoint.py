@@ -70,7 +70,13 @@ class KatEntryPoint(BackendEntrypoint):
     assert urlbits.scheme in {"http", "https"}
 
     token = parse_qs(urlbits.query).get("token", [None])[0]
-    datasource = Multiton(TelstateDataSource.from_url, url, chunk_store=None)
+    datasource = Multiton(
+      TelstateDataSource.from_url,
+      url,
+      chunk_store=None,
+      capture_block_id=capture_block_id,
+      stream_name=stream_name,
+    )
     sensor_cache = Multiton(sensor_cache_factory, datasource)
     endpoint = SplitResult(urlbits.scheme, urlbits.netloc, "", "", "").geturl()
     group_factory = GroupFactory(datasource, sensor_cache, endpoint, token)
