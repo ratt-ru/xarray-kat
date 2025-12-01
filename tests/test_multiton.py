@@ -52,7 +52,7 @@ def test_multiton_release():
 
 
 def test_multiton_reentrant():
-  """Tests that"""
+  """Tests RLock works"""
 
   def inner_factory(m: Multiton[Data]) -> Data:
     return m.instance
@@ -63,3 +63,15 @@ def test_multiton_reentrant():
   om = Multiton(outer_factory, 2, Multiton(Data, 1.0, b=2.0))
   assert om.instance.a == 1.0
   assert om.instance.b == 2.0
+
+
+
+def test_multiton_engaged():
+  """ Tests that a multiton instance is automatically engaged,
+  if it has already been engaged by another Multiton"""
+  m1 = Multiton(Data, 1.0, b=3.0)
+  assert m1._instance is None
+  assert m1.instance == Data(1.0, 3.0)
+
+  m2 = Multiton(Data, 1.0, b=3.0)
+  assert m2._instance == Data(1.0, 3.0)
