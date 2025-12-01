@@ -55,7 +55,14 @@ class Multiton(Generic[T]):
     self._factory = factory
     self._args, self._kw = normalise_args(factory, args, kw)
     self._key = FrozenKey(factory, *self._args, **self._kw)
-    self._instance = None
+
+    # Acquire the instance if it has already been created
+    # by another Multiton
+    with self._INSTANCE_LOCK:
+      try:
+        self._instance = self._INSTANCE_CACHE[self._key]
+      except KeyError:
+        self._instance = None
 
   @staticmethod
   def from_reduce_args(factory: Callable[..., T], args, kw) -> Multiton[T]:
@@ -75,7 +82,7 @@ class Multiton(Generic[T]):
 
   @property
   def instance(self) -> T:
-    """Returns the instance defined by this Multiton"""
+    """Returns the instance defined by this Multiton, creating it if necessary"""
     if self._instance is not None:
       return self._instance
 
