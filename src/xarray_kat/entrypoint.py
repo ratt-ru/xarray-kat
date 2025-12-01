@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Any, Dict, Iterable
+from typing import TYPE_CHECKING, Any, Dict, Iterable, Literal
 from urllib.parse import SplitResult, parse_qs, urlsplit
 
 from xarray import DataTree
@@ -51,12 +51,14 @@ class KatEntryPoint(BackendEntrypoint):
     drop_variables=None,
     capture_block_id: str | None = None,
     stream_name: str | None = None,
+    van_vleck: Literal["off", "autocorr"] = "off",
   ):
     group_dicts = self.open_groups_as_dict(
       filename_or_obj,
       drop_variables=drop_variables,
       capture_block_id=capture_block_id,
       stream_name=stream_name,
+      van_vleck=van_vleck
     )
     return DataTree.from_dict(group_dicts)
 
@@ -67,6 +69,7 @@ class KatEntryPoint(BackendEntrypoint):
     drop_variables: str | Iterable[str] | None = None,
     capture_block_id: str | None = None,
     stream_name: str | None = None,
+    van_vleck: Literal["off", "autocorr"] = "off",
   ) -> Dict[str, Any]:
     url = str(filename_or_obj)
     urlbits = urlsplit(url)
@@ -79,6 +82,7 @@ class KatEntryPoint(BackendEntrypoint):
       chunk_store=None,
       capture_block_id=capture_block_id,
       stream_name=stream_name,
+      van_vleck=van_vleck,
     )
     sensor_cache = Multiton(sensor_cache_factory, datasource)
     endpoint = SplitResult(urlbits.scheme, urlbits.netloc, "", "", "").geturl()
