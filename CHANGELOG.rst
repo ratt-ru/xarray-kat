@@ -3,6 +3,7 @@ Changelog
 
 X.Y.Z (DD-MM-YYY)
 -----------------
+* Engage Multiton instance if it has already been created (:pr:`20`)
 * Vendor van Fleck transformation code from katdal (:pr:`19`)
 * Pass ``capture_block_id`` and ``stream_name`` to ``TelstateDataSource.from_url`` (:pr:`18`)
 * Add missing SensorGetter import (:pr:`17`)
