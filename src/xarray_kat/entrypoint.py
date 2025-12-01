@@ -53,7 +53,10 @@ class KatEntryPoint(BackendEntrypoint):
     stream_name: str | None = None,
   ):
     group_dicts = self.open_groups_as_dict(
-      filename_or_obj, drop_variables=drop_variables
+      filename_or_obj,
+      drop_variables=drop_variables,
+      capture_block_id=capture_block_id,
+      stream_name=stream_name,
     )
     return DataTree.from_dict(group_dicts)
 
