@@ -49,6 +49,7 @@ class KatEntryPoint(BackendEntrypoint):
     filename_or_obj,
     *,
     drop_variables=None,
+    scan_states: Iterable[str] = ("scan", "track"),
     capture_block_id: str | None = None,
     stream_name: str | None = None,
     van_vleck: Literal["off", "autocorr"] = "off",
@@ -56,6 +57,7 @@ class KatEntryPoint(BackendEntrypoint):
     group_dicts = self.open_groups_as_dict(
       filename_or_obj,
       drop_variables=drop_variables,
+      scan_states=scan_states,
       capture_block_id=capture_block_id,
       stream_name=stream_name,
       van_vleck=van_vleck
@@ -67,6 +69,7 @@ class KatEntryPoint(BackendEntrypoint):
     filename_or_obj: str | os.PathLike[Any] | BufferedIOBase | AbstractDataStore,
     *,
     drop_variables: str | Iterable[str] | None = None,
+    scan_states: Iterable[str] = ("scan", "track"),
     capture_block_id: str | None = None,
     stream_name: str | None = None,
     van_vleck: Literal["off", "autocorr"] = "off",
@@ -86,5 +89,5 @@ class KatEntryPoint(BackendEntrypoint):
     )
     sensor_cache = Multiton(sensor_cache_factory, datasource)
     endpoint = SplitResult(urlbits.scheme, urlbits.netloc, "", "", "").geturl()
-    group_factory = GroupFactory(datasource, sensor_cache, endpoint, token)
+    group_factory = GroupFactory(datasource, sensor_cache, scan_states, endpoint, token)
     return group_factory.create()
