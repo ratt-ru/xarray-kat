@@ -5,7 +5,7 @@ import re
 import time
 from datetime import datetime, timezone
 from importlib.metadata import version as importlib_version
-from typing import TYPE_CHECKING, Dict
+from typing import TYPE_CHECKING, Dict, Iterable, Set
 
 import numpy as np
 import numpy.typing as npt
@@ -94,6 +94,7 @@ def _index_store(store: Multiton[ts.TensorStore], index) -> ts.TensorStore:
 class GroupFactory:
   _datasource: Multiton[TelstateDataSource]
   _sensor_cache: Multiton[SensorCache]
+  _scan_states: Set[str]
   _endpoint: str
   _token: str | None
 
@@ -101,11 +102,13 @@ class GroupFactory:
     self,
     datasource: Multiton[TelstateDataSource],
     sensor_cache: Multiton[SensorCache],
+    scan_states: Iterable[str],
     endpoint: str,
     token: str | None = None,
   ):
     self._datasource = datasource
     self._sensor_cache = sensor_cache
+    self._scan_states = set(scan_states)
     self._endpoint = endpoint
     self._token = token
 
@@ -201,8 +204,11 @@ class GroupFactory:
 
     for i, scan_index in enumerate(unique_scans):
       mask = scan_inv == i
+      if (state := next(iter(scan_states[mask]))) not in self._scan_states:
+        continue
+
       target = next(iter(targets[mask]))
-      state = next(iter(scan_states[mask]))
+
       if np.all(np.diff(mask_index := np.where(mask)[0]) == 1):
         mask_index = slice(mask_index[0], mask_index[-1] + 1)
 
