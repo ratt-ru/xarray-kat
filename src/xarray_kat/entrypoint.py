@@ -25,6 +25,7 @@ class KatEntryPoint(BackendEntrypoint):
   open_dataset_parameters = ["filename_or_obj, capture_block_id", "stream_name"]
   description = "Opens a MeerKAT data source"
   supports_groups = True
+  url = "https://github.com/ratt-ru/xarray-kat"
 
   def guess_can_open(
     self,
