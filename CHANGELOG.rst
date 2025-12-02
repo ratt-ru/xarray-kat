@@ -3,6 +3,7 @@ Changelog
 
 X.Y.Z (DD-MM-YYY)
 -----------------
+* Add ``KatEntryPoint.url`` class variable (:pr:`24`)
 * Support selection on scan states (:pr:`23`)
 * Engage Multiton instance if it has already been created (:pr:`20`)
 * Vendor van Fleck transformation code from katdal (:pr:`19`, :pr:`22`)
