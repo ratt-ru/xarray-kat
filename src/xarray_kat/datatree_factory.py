@@ -13,8 +13,11 @@ import xarray
 from xarray.core.indexing import LazilyIndexedArray
 
 from xarray_kat.array import CorrProductArray, WeightArray
-from xarray_kat.meerkat_stores import http_store_factory, virtual_chunked_store
 from xarray_kat.multiton import Multiton
+from xarray_kat.stores.base_store import base_virtual_store
+from xarray_kat.stores.http_store import http_store_factory
+from xarray_kat.stores.vis_store import vis_virtual_store
+from xarray_kat.types import VanVleckLiteralType
 
 if TYPE_CHECKING:
   import tensorstore as ts
@@ -95,6 +98,7 @@ class GroupFactory:
   _datasource: Multiton[TelstateDataSource]
   _sensor_cache: Multiton[SensorCache]
   _scan_states: Set[str]
+  _van_vleck: VanVleckLiteralType
   _endpoint: str
   _token: str | None
 
@@ -103,30 +107,47 @@ class GroupFactory:
     datasource: Multiton[TelstateDataSource],
     sensor_cache: Multiton[SensorCache],
     scan_states: Iterable[str],
+    van_vleck: VanVleckLiteralType,
     endpoint: str,
     token: str | None = None,
   ):
     self._datasource = datasource
     self._sensor_cache = sensor_cache
     self._scan_states = set(scan_states)
+    self._van_vleck = van_vleck
     self._endpoint = endpoint
     self._token = token
+
+  def http_store(self, data_type: str) -> Multiton[ts.TensorStore]:
+    """Create an http kvstore with a path looking like ``1234567890_sdp_l0/correlator_data/``"""
+    chunk_info = self._datasource.instance.telstate["chunk_info"]
+    chunk_schema = chunk_info[data_type]
+    path = f"{chunk_schema['prefix']}/{data_type}/"
+    return Multiton(http_store_factory, self._endpoint, path, self._token, None)
 
   def http_backed_store(self, data_type: str) -> Multiton[ts.TensorStore]:
     """Create a virtual chunked tensorstore backed by an http kvstore
     that pulls data off the MeerKAT archive"""
-    chunk_info = self._datasource.instance.telstate["chunk_info"]
-    chunk_schema = chunk_info[data_type]
-    http_store = Multiton(
-      http_store_factory, self._endpoint, chunk_schema["prefix"], self._token, None
-    )
     return Multiton(
-      virtual_chunked_store,
-      http_store,
-      data_type,
-      chunk_schema,
+      base_virtual_store,
+      self.http_store(data_type),
+      self._datasource.instance.telstate["chunk_info"][data_type],
       DATA_TYPE_LABELS[data_type],
       MISSING_VALUES[data_type],
+      None,
+    )
+
+  def http_backed_vis_store(
+    self, corrprods: npt.NDArray, data_type: str = "correlator_data"
+  ) -> Multiton[ts.TensorStore]:
+    return Multiton(
+      vis_virtual_store,
+      self.http_store(data_type),
+      self._datasource.instance.telstate["chunk_info"][data_type],
+      DATA_TYPE_LABELS[data_type],
+      MISSING_VALUES[data_type],
+      corrprods,
+      self._van_vleck,
       None,
     )
 
@@ -188,7 +209,8 @@ class GroupFactory:
     ant2_names = np.array(cp_ant2_names[:: len(upols)], dtype=str)
     pols = np.array([HV_TO_LINEAR_MAP[p] for p in cp_pols[: len(upols)]], dtype=str)
 
-    corr_data_store = self.http_backed_store("correlator_data")
+    corr_data_store = self.http_backed_vis_store(corrprods)
+    # corr_data_store = self.http_backed_store("correlator_data")
     flag_store = self.http_backed_store("flags")
     weight_store = self.http_backed_store("weights")
     weight_channel_store = self.http_backed_store("weights_channel")

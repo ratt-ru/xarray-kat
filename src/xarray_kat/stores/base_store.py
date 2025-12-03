@@ -1,59 +1,17 @@
-import asyncio
 import logging
 from functools import reduce
 from io import BytesIO
 from operator import mul
-from typing import Any, Collection, Dict, Tuple
+from typing import Any, Dict, Tuple
 
 import numpy as np
 import numpy.typing as npt
 import tensorstore as ts
 from numpy.lib.format import read_array_header_1_0, read_array_header_2_0, read_magic
 
-from xarray_kat.async_loop import AsyncLoopSingleton
 from xarray_kat.multiton import Multiton
 
 log = logging.getLogger(__name__)
-
-
-def http_spec(
-  endpoint: str, path: str, token: str | None
-) -> Dict[str, Collection[str]]:
-  """Creates a spec defining an http specification for accessing
-  the MeerKAT HTTP archive.
-
-  Args:
-    endpoint: the http(s) endpoint
-    path: Relative path from the endpoint
-    token: The JWT token, if available
-
-  Returns:
-    Tensorstore kvstore specification
-  """
-  spec: Dict[str, Collection[str]] = {
-    "driver": "http",
-    "base_url": endpoint,
-    "path": path,
-  }
-
-  if token:
-    spec["headers"] = [f"Authorization: Bearer {token}"]
-
-  return spec
-
-
-def http_store_factory(
-  endpoint: str,
-  path: str,
-  token: str | None = None,
-  context: ts.Context | None = None,
-) -> ts.TensorStore:
-  """Creates an http(s) tensorstore referencing the specified
-  endpoint and path.
-
-  A jwt token is required if the endpoint is an https endpoint."""
-  spec = http_spec(endpoint, path, token)
-  return ts.KvStore.open(spec, context=context).result()
 
 
 def read_array(raw_bytes: bytes) -> npt.NDArray | None:
@@ -87,14 +45,27 @@ def read_array(raw_bytes: bytes) -> npt.NDArray | None:
   return result
 
 
-def virtual_chunked_store(
+def base_virtual_store(
   http_store: Multiton[ts.TensorStore],
-  data_type: str,
   data_schema: Dict[str, Any],
   dim_labels: Tuple[str, ...],
   missing_value: Any,
   context: ts.Context,
 ) -> ts.TensorStore:
+  """Creates a virtual_chunked TensorStore over a set of keys in an http_store.
+
+  Args:
+    http_store: A http KvStore. It's path should be set to
+    data_schema: Dictionary derived from telstate described the
+      schema of this array, in particular it's data type (dtype)
+      and chunking (chunks).
+    dim_labels: The labels associated with each dimension of
+      the data
+    missing_value: Value substituted for the portion of the
+      store corresponding to a missing key in the http KvStore.
+    context: TensorStore context to associated with the returned
+      store.
+  """
   dtype = data_schema["dtype"]
   chunks = data_schema["chunks"]
   shape = tuple(sum(dc) for dc in chunks)
@@ -108,44 +79,30 @@ def virtual_chunked_store(
     strips off the header and then assigns the resulting data
     into array:
 
-    /correlator-data/00000_00000_00000.npy
-    /correlator-data/00001_00000_00000.npy
-    /correlator-data/00000_00032_00000.npy
-    /flags/00000_00032_00000.npy
+    00000_00000_00000.npy
+    00001_00000_00000.npy
+    00000_00032_00000.npy
     """
     key_parts = [f"{o:05}" for o in domain.origin]
-    key = f"/{data_type}/{'_'.join(key_parts)}.npy"
+    key = f"{'_'.join(key_parts)}.npy"
+    log.debug("%d Read %s into domain %s", key, domain)
+    data = None
 
-    async def key_reader(store, key: str):
-      return await store.read(key)
-
-    for attempt in range(3):
-      log.debug("%d Read %s into domain %s", attempt, key, domain)
-      coro = key_reader(http_store.instance, key)
-      read_result = asyncio.run_coroutine_threadsafe(
-        coro, AsyncLoopSingleton().instance
-      ).result()
-
-      if read_result.state == "missing":
-        data = None
-        break
-      elif (
-        read_result.state == "value"
-        and (data := read_array(read_result.value)) is not None
-      ):
-        log.debug("Completed reading %s into domain %s", key, domain)
-        break
+    if (result := http_store.instance.read(key).result()).state == "value" and (
+      data := read_array(result.value)
+    ) is not None:
+      log.debug("Read %s into domain %s", key, domain)
 
     # Fill with defaults if retrieval failed
     if data is None:
-      log.warning("Substituting %s for missing key %s", missing_value, key)
+      log.warning("Defaulting to %s for missing key %s", missing_value, key)
       array[...] = missing_value
-      return read_result.stamp
+      return result.stamp
 
     assert array.shape == data.shape
     chunk_domain = domain.translate_backward_by[domain.origin]
     array[...] = data[chunk_domain.index_exp]
-    return read_result.stamp
+    return result.stamp
 
   return ts.virtual_chunked(
     read_function=read_chunk,
