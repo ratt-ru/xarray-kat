@@ -7,7 +7,10 @@ from xarray_kat.third_party.vendored.katdal.categorical import (
   CategoricalData,
   ComparableArrayWrapper,
 )
-from xarray_kat.third_party.vendored.katdal.sensordata import SensorGetter, SimpleSensorGetter
+from xarray_kat.third_party.vendored.katdal.sensordata import (
+  SensorGetter,
+  SimpleSensorGetter,
+)
 from xarray_kat.third_party.vendored.katdal.spectral_window import SpectralWindow
 
 # A constant indicating invalid / absent gain (typically due to flagged data)

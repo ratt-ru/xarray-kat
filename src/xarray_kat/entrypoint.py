@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Any, Dict, Iterable, Literal
+from typing import TYPE_CHECKING, Any, Dict, Iterable
 from urllib.parse import SplitResult, parse_qs, urlsplit
 
 from xarray import DataTree
@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 from xarray_kat.datatree_factory import GroupFactory
 from xarray_kat.katdal_types import TelstateDataSource, sensor_cache_factory
 from xarray_kat.multiton import Multiton
+from xarray_kat.types import VanVleckLiteralType
 
 
 class KatStore(AbstractDataStore):
@@ -53,7 +54,7 @@ class KatEntryPoint(BackendEntrypoint):
     scan_states: Iterable[str] = ("scan", "track"),
     capture_block_id: str | None = None,
     stream_name: str | None = None,
-    van_vleck: Literal["off", "autocorr"] = "off",
+    van_vleck: VanVleckLiteralType = "off",
   ):
     group_dicts = self.open_groups_as_dict(
       filename_or_obj,
@@ -61,7 +62,7 @@ class KatEntryPoint(BackendEntrypoint):
       scan_states=scan_states,
       capture_block_id=capture_block_id,
       stream_name=stream_name,
-      van_vleck=van_vleck
+      van_vleck=van_vleck,
     )
     return DataTree.from_dict(group_dicts)
 
@@ -73,7 +74,7 @@ class KatEntryPoint(BackendEntrypoint):
     scan_states: Iterable[str] = ("scan", "track"),
     capture_block_id: str | None = None,
     stream_name: str | None = None,
-    van_vleck: Literal["off", "autocorr"] = "off",
+    van_vleck: VanVleckLiteralType = "off",
   ) -> Dict[str, Any]:
     url = str(filename_or_obj)
     urlbits = urlsplit(url)
@@ -90,5 +91,7 @@ class KatEntryPoint(BackendEntrypoint):
     )
     sensor_cache = Multiton(sensor_cache_factory, datasource)
     endpoint = SplitResult(urlbits.scheme, urlbits.netloc, "", "", "").geturl()
-    group_factory = GroupFactory(datasource, sensor_cache, scan_states, endpoint, token)
+    group_factory = GroupFactory(
+      datasource, sensor_cache, scan_states, van_vleck, endpoint, token
+    )
     return group_factory.create()

@@ -3,6 +3,8 @@ Changelog
 
 X.Y.Z (DD-MM-YYY)
 -----------------
+* Apply Van Vleck Corrections (:pr:`25`)
+* Add numba as an optional dependency (:pr:`25`)
 * Add ``KatEntryPoint.url`` class variable (:pr:`24`)
 * Support selection on scan states (:pr:`23`)
 * Engage Multiton instance if it has already been created (:pr:`20`)

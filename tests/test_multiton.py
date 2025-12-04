@@ -65,9 +65,8 @@ def test_multiton_reentrant():
   assert om.instance.b == 2.0
 
 
-
 def test_multiton_engaged():
-  """ Tests that a multiton instance is automatically engaged,
+  """Tests that a multiton instance is automatically engaged,
   if it has already been engaged by another Multiton"""
   m1 = Multiton(Data, 1.0, b=3.0)
   assert m1._instance is None
