@@ -5,24 +5,28 @@ import re
 import time
 from datetime import datetime, timezone
 from importlib.metadata import version as importlib_version
-from typing import TYPE_CHECKING, Dict, Iterable, Set
+from typing import TYPE_CHECKING, Any, Dict, Iterable, Set
 
 import numpy as np
 import numpy.typing as npt
+import tensorstore as ts
 import xarray
 from xarray.core.indexing import LazilyIndexedArray
 
-from xarray_kat.array import CorrProductArray, WeightArray
+from xarray_kat.array import CorrProductArray
+from xarray_kat.katdal_types import AutoCorrelationIndices, corrprod_to_autocorr
 from xarray_kat.multiton import Multiton
 from xarray_kat.stores.base_store import base_virtual_store
 from xarray_kat.stores.http_store import http_store_factory
 from xarray_kat.stores.vis_store import vis_virtual_store
+from xarray_kat.stores.weight_store import scaled_weight_store
 from xarray_kat.types import VanVleckLiteralType
 
 if TYPE_CHECKING:
-  import tensorstore as ts
-
   from xarray_kat.katdal_types import SensorCache, TelstateDataSource
+
+
+CACHE_SIZE = 100 * 1024 * 1024
 
 MISSING_VALUES = {
   "correlator_data": 0j,
@@ -118,6 +122,9 @@ class GroupFactory:
     self._endpoint = endpoint
     self._token = token
 
+  def get_context(self, spec: Dict[str, Any]) -> ts.Context:
+    return ts.Context(spec=ts.Context.Spec(spec))
+
   def http_store(self, data_type: str) -> Multiton[ts.TensorStore]:
     """Create an http kvstore with a path looking like ``1234567890_sdp_l0/correlator_data/``"""
     chunk_info = self._datasource.instance.telstate["chunk_info"]
@@ -134,11 +141,13 @@ class GroupFactory:
       self._datasource.instance.telstate["chunk_info"][data_type],
       DATA_TYPE_LABELS[data_type],
       MISSING_VALUES[data_type],
-      None,
+      self.get_context({"cache_pool": {"total_bytes_limit": CACHE_SIZE}}),
     )
 
   def http_backed_vis_store(
-    self, corrprods: npt.NDArray, data_type: str = "correlator_data"
+    self,
+    autocorrs: Multiton[AutoCorrelationIndices],
+    data_type: str = "correlator_data",
   ) -> Multiton[ts.TensorStore]:
     return Multiton(
       vis_virtual_store,
@@ -146,9 +155,25 @@ class GroupFactory:
       self._datasource.instance.telstate["chunk_info"][data_type],
       DATA_TYPE_LABELS[data_type],
       MISSING_VALUES[data_type],
-      corrprods,
+      autocorrs,
       self._van_vleck,
-      None,
+      self.get_context({"cache_pool": {"total_bytes_limit": CACHE_SIZE}}),
+    )
+
+  def http_backed_weight_store(
+    self,
+    vis_store: Multiton[ts.TensorStore],
+    autocorrs: Multiton[AutoCorrelationIndices],
+  ) -> Multiton[ts.TensorStore]:
+    return Multiton(
+      scaled_weight_store,
+      self.http_backed_store("weights"),
+      self.http_backed_store("weights_channel"),
+      vis_store,
+      autocorrs,
+      self._datasource,
+      DATA_TYPE_LABELS["correlator_data"],
+      self.get_context({"data_copy_concurrency": {"limit": 12}}),
     )
 
   def create(self) -> Dict[str, xarray.Dataset]:
@@ -191,6 +216,7 @@ class GroupFactory:
         continue
 
     corrprods = telstate["bls_ordering"]
+    autocorrs = Multiton(corrprod_to_autocorr, corrprods)
     baseline_pols = _corrprods_to_baseline_pols(corrprods)
     assert len(corrprods) == len(baseline_pols)
     cp_argsort = np.array(
@@ -209,11 +235,9 @@ class GroupFactory:
     ant2_names = np.array(cp_ant2_names[:: len(upols)], dtype=str)
     pols = np.array([HV_TO_LINEAR_MAP[p] for p in cp_pols[: len(upols)]], dtype=str)
 
-    corr_data_store = self.http_backed_vis_store(corrprods)
-    # corr_data_store = self.http_backed_store("correlator_data")
+    corr_data_store = self.http_backed_vis_store(autocorrs)
+    weight_store = self.http_backed_weight_store(corr_data_store, autocorrs)
     flag_store = self.http_backed_store("flags")
-    weight_store = self.http_backed_store("weights")
-    weight_channel_store = self.http_backed_store("weights_channel")
 
     sensor_cache = self._sensor_cache.instance
     targets = sensor_cache["Observation/target"]
@@ -238,15 +262,12 @@ class GroupFactory:
         Multiton(_index_store, corr_data_store, mask_index), cp_argsort, len(pols)
       )
 
-      flag_array = CorrProductArray(
-        Multiton(_index_store, flag_store, mask_index), cp_argsort, len(pols)
+      weight_array = CorrProductArray(
+        Multiton(_index_store, weight_store, mask_index), cp_argsort, len(pols)
       )
 
-      weight_array = WeightArray(
-        Multiton(_index_store, weight_store, mask_index),
-        Multiton(_index_store, weight_channel_store, mask_index),
-        cp_argsort,
-        len(pols),
+      flag_array = CorrProductArray(
+        Multiton(_index_store, flag_store, mask_index), cp_argsort, len(pols)
       )
 
       name_array_map = [

@@ -3,6 +3,10 @@ from xarray_kat.third_party.vendored.katdal.datasources_minimal import (
   TelstateDataSource,
 )
 from xarray_kat.third_party.vendored.katdal.sensordata import SensorCache
+from xarray_kat.third_party.vendored.katdal.vis_flags_weights_minimal import (
+  AutoCorrelationIndices,  # noqa: F401
+  corrprod_to_autocorr,  # noqa: F401
+)
 from xarray_kat.third_party.vendored.katdal.visdatav4_minimal import VisibilityDataV4
 
 
