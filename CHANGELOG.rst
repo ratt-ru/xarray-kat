@@ -3,6 +3,7 @@ Changelog
 
 X.Y.Z (DD-MM-YYY)
 -----------------
+* Apply Weight Scaling (:pr:`26`)
 * Apply Van Vleck Corrections (:pr:`25`)
 * Add numba as an optional dependency (:pr:`25`)
 * Add ``KatEntryPoint.url`` class variable (:pr:`24`)
