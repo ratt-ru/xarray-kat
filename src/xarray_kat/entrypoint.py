@@ -12,7 +12,7 @@ if TYPE_CHECKING:
   from io import BufferedIOBase
 
 
-from xarray_kat.datatree_factory import GroupFactory
+from xarray_kat.datatree_factory import DataTreeFactory
 from xarray_kat.katdal_types import TelstateDataSource, sensor_cache_factory
 from xarray_kat.multiton import Multiton
 from xarray_kat.types import VanVleckLiteralType
@@ -91,7 +91,7 @@ class KatEntryPoint(BackendEntrypoint):
     )
     sensor_cache = Multiton(sensor_cache_factory, datasource)
     endpoint = SplitResult(urlbits.scheme, urlbits.netloc, "", "", "").geturl()
-    group_factory = GroupFactory(
+    group_factory = DataTreeFactory(
       datasource, sensor_cache, scan_states, van_vleck, endpoint, token
     )
     return group_factory.create()
