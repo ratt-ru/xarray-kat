@@ -2,12 +2,11 @@ import logging
 from typing import Any, Dict, Tuple
 
 import numpy as np
-import numpy.typing as npt
 import tensorstore as ts
 
+from xarray_kat.katdal_types import AutoCorrelationIndices
 from xarray_kat.multiton import Multiton
 from xarray_kat.stores.base_store import read_array
-from xarray_kat.third_party.vendored.katdal.vis_flags_weights_minimal import corrprod_to_autocorr
 from xarray_kat.third_party.vendored.katdal.van_vleck import autocorr_lookup_table
 from xarray_kat.types import VanVleckLiteralType
 
@@ -23,7 +22,7 @@ def vis_virtual_store(
   data_schema: Dict[str, Any],
   dim_labels: Tuple[str, ...],
   missing_value: Any,
-  corrprods: npt.NDArray,
+  autocorrs: Multiton[AutoCorrelationIndices],
   van_vleck: VanVleckLiteralType,
   context: ts.Context,
 ) -> ts.TensorStore:
@@ -40,15 +39,17 @@ def vis_virtual_store(
       store corresponding to a missing key in the http KvStore.
     corrprods: Correlation product array derived from telstate
     van_vleck: Literal controlling application of Van Vleck Corrections.
-    context: TensorStore context to associated with the returned store.
+    context: TensorStore context to associate with the returned store.
+
+  Returns:
+    A TensorStore representing visibility data, possibly with
+    Van Vleck Corrections applied.
   """
   dtype = data_schema["dtype"]
   chunks = data_schema["chunks"]
   shape = tuple(sum(dc) for dc in chunks)
   if not all(all(dc[0] == c for c in dc[1:-1]) for dc in chunks):
     raise ValueError(f"{chunks} are not homogenous")
-
-  autocorrs = Multiton(corrprod_to_autocorr, corrprods)
 
   def read_chunk(
     domain: ts.IndexDomain, array: np.ndarray, params: ts.VirtualChunkedReadParameters
@@ -75,6 +76,7 @@ def vis_virtual_store(
     if data is None:
       log.warning("Defaulting to %s for missing key %s", missing_value, key)
       array[...] = missing_value
+      data = array
     else:
       assert array.shape == data.shape
       chunk_domain = domain.translate_backward_by[domain.origin]
