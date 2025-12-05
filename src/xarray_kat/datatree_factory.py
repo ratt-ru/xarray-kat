@@ -98,7 +98,7 @@ def _index_store(store: Multiton[ts.TensorStore], index) -> ts.TensorStore:
   return store.instance[index]
 
 
-class GroupFactory:
+class DataTreeFactory:
   _datasource: Multiton[TelstateDataSource]
   _sensor_cache: Multiton[SensorCache]
   _scan_states: Set[str]
