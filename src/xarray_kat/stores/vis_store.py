@@ -39,7 +39,11 @@ def vis_virtual_store(
       store corresponding to a missing key in the http KvStore.
     corrprods: Correlation product array derived from telstate
     van_vleck: Literal controlling application of Van Vleck Corrections.
-    context: TensorStore context to associated with the returned store.
+    context: TensorStore context to associate with the returned store.
+
+  Returns:
+    A TensorStore representing visibility data, possibly with
+    Van Vleck Corrections applied.
   """
   dtype = data_schema["dtype"]
   chunks = data_schema["chunks"]
