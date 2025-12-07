@@ -29,8 +29,6 @@ def http_spec(
   if token:
     spec["headers"] = [f"Authorization: Bearer {token}"]
 
-  print(spec)
-
   return spec
 
 
