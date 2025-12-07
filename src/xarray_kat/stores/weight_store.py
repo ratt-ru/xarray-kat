@@ -61,7 +61,8 @@ def scaled_weight_store(
     int_weights_rr.force()
     channel_weights_rr.force()
     vis_rr.force()
-    weights = int_weights_rr.result() * channel_weights_rr.result()[..., None]
+    weights = int_weights_rr.result()
+    weights *= channel_weights_rr.result()[..., None]
 
     array[...] = weight_power_scale(
       vis_rr.result(),
