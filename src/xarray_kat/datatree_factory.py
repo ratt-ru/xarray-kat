@@ -165,13 +165,16 @@ class DataTreeFactory:
     vis_store: Multiton[ts.TensorStore],
     autocorrs: Multiton[AutoCorrelationIndices],
   ) -> Multiton[ts.TensorStore]:
+    telstate = self._datasource.instance.telstate
+
     return Multiton(
       scaled_weight_store,
       self.http_backed_store("weights"),
       self.http_backed_store("weights_channel"),
       vis_store,
       autocorrs,
-      self._datasource,
+      telstate["chunk_info"],
+      telstate.get("needs_weight_power_scale", False),
       DATA_TYPE_LABELS["correlator_data"],
       self.get_context({"data_copy_concurrency": {"limit": 12}}),
     )
