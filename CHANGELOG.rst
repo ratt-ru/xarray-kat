@@ -3,6 +3,7 @@ Changelog
 
 X.Y.Z (DD-MM-YYY)
 -----------------
+* Elide TelstateDatasource argument to scaled weight store (:pr:`28`)
 * Rename GroupFactory to DataTreeFactory (:pr:`27`)
 * Apply Weight Scaling (:pr:`26`)
 * Apply Van Vleck Corrections (:pr:`25`)

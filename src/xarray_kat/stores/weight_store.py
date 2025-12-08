@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Tuple
 
 import numpy as np
 import tensorstore as ts
@@ -10,7 +10,7 @@ from xarray_kat.third_party.vendored.katdal.vis_flags_weights_minimal import (
 )
 
 if TYPE_CHECKING:
-  from xarray_kat.katdal_types import AutoCorrelationIndices, TelstateDataSource
+  from xarray_kat.katdal_types import AutoCorrelationIndices
   from xarray_kat.multiton import Multiton
 
 
@@ -19,7 +19,8 @@ def scaled_weight_store(
   channel_weights_store: Multiton[ts.TensorStore],
   vis_store: Multiton[ts.TensorStore],
   autocorrs: Multiton[AutoCorrelationIndices],
-  datasource: Multiton[TelstateDataSource],
+  chunk_info: Dict[str, Any],
+  apply_scaling: bool,
   dim_labels: Tuple[str, ...],
   context: ts.Context,
 ):
@@ -30,8 +31,10 @@ def scaled_weight_store(
     int_weights_store: uint8 weights TensorStore of shape ``(time, frequency, corrprod)``.
     channel_weights_store: float32 weights TensorStore of shape ``(time, frequency)``.
     vis_store: complex visibility TensorStore of shape ``(time, frequency, corrprod)``.
-    autocorrs: Autocorrelation indices mapping
-    datasource: The telescope state datasource.
+    autocorrs: Autocorrelation indices mapping.
+    chunk_info: telstate chunk info dictionary
+    apply_scaling: bool whether scaling should be applied or reversed.
+      Should be derived from telstate["needs_weight_power_scale"].
     dim_labels: Dimension labels applied to the returned store.
       Should be ``(time, frequency, corrprod)``.
     context: TensorStore context associated with the returned store.
@@ -40,15 +43,10 @@ def scaled_weight_store(
     A TensorStore representing the weights scaled by the visibilities.
 
   """
-  telstate = datasource.instance.telstate
-  chunk_info = telstate["chunk_info"]
   vis_chunks = chunk_info["correlator_data"]["chunks"]
   vis_shape = tuple(sum(dc) for dc in vis_chunks)
   if not all(all(dc[0] == c for c in dc[1:-1]) for dc in vis_chunks):
     raise ValueError(f"Visibility {vis_chunks} are not homogenous")
-
-  # Should scaling be applied or reversed?
-  apply_scaling = telstate.get("needs_weight_power_scale", False)
 
   def read_chunk(
     domain: ts.IndexDomain, array: np.ndarray, params: ts.VirtualChunkedReadParameters
@@ -63,7 +61,8 @@ def scaled_weight_store(
     int_weights_rr.force()
     channel_weights_rr.force()
     vis_rr.force()
-    weights = int_weights_rr.result() * channel_weights_rr.result()[..., None]
+    weights = int_weights_rr.result()
+    weights *= channel_weights_rr.result()[..., None]
 
     array[...] = weight_power_scale(
       vis_rr.result(),
