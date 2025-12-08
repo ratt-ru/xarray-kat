@@ -23,7 +23,7 @@ from xarray_kat.stores.weight_store import scaled_weight_store
 from xarray_kat.types import VanVleckLiteralType
 
 if TYPE_CHECKING:
-  from xarray_kat.katdal_types import SensorCache, TelstateDataSource
+  from xarray_kat.katdal_types import TelstateDataProducts
 
 
 CACHE_SIZE = 100 * 1024 * 1024
@@ -99,8 +99,7 @@ def _index_store(store: Multiton[ts.TensorStore], index) -> ts.TensorStore:
 
 
 class DataTreeFactory:
-  _datasource: Multiton[TelstateDataSource]
-  _sensor_cache: Multiton[SensorCache]
+  _data_products: Multiton[TelstateDataProducts]
   _scan_states: Set[str]
   _van_vleck: VanVleckLiteralType
   _endpoint: str
@@ -108,15 +107,13 @@ class DataTreeFactory:
 
   def __init__(
     self,
-    datasource: Multiton[TelstateDataSource],
-    sensor_cache: Multiton[SensorCache],
+    data_products: Multiton[TelstateDataProducts],
     scan_states: Iterable[str],
     van_vleck: VanVleckLiteralType,
     endpoint: str,
     token: str | None = None,
   ):
-    self._datasource = datasource
-    self._sensor_cache = sensor_cache
+    self._data_products = data_products
     self._scan_states = set(scan_states)
     self._van_vleck = van_vleck
     self._endpoint = endpoint
@@ -127,7 +124,7 @@ class DataTreeFactory:
 
   def http_store(self, data_type: str) -> Multiton[ts.TensorStore]:
     """Create an http kvstore with a path looking like ``1234567890_sdp_l0/correlator_data/``"""
-    chunk_info = self._datasource.instance.telstate["chunk_info"]
+    chunk_info = self._data_products.instance.telstate["chunk_info"]
     chunk_schema = chunk_info[data_type]
     path = f"{chunk_schema['prefix']}/{data_type}/"
     return Multiton(http_store_factory, self._endpoint, path, self._token, None)
@@ -138,7 +135,7 @@ class DataTreeFactory:
     return Multiton(
       base_virtual_store,
       self.http_store(data_type),
-      self._datasource.instance.telstate["chunk_info"][data_type],
+      self._data_products.instance.telstate["chunk_info"][data_type],
       DATA_TYPE_LABELS[data_type],
       MISSING_VALUES[data_type],
       self.get_context({"cache_pool": {"total_bytes_limit": CACHE_SIZE}}),
@@ -152,7 +149,7 @@ class DataTreeFactory:
     return Multiton(
       vis_virtual_store,
       self.http_store(data_type),
-      self._datasource.instance.telstate["chunk_info"][data_type],
+      self._data_products.instance.telstate["chunk_info"][data_type],
       DATA_TYPE_LABELS[data_type],
       MISSING_VALUES[data_type],
       autocorrs,
@@ -165,7 +162,7 @@ class DataTreeFactory:
     vis_store: Multiton[ts.TensorStore],
     autocorrs: Multiton[AutoCorrelationIndices],
   ) -> Multiton[ts.TensorStore]:
-    telstate = self._datasource.instance.telstate
+    telstate = self._data_products.instance.telstate
 
     return Multiton(
       scaled_weight_store,
@@ -180,7 +177,7 @@ class DataTreeFactory:
     )
 
   def create(self) -> Dict[str, xarray.Dataset]:
-    telstate = self._datasource.instance.telstate
+    telstate = self._data_products.instance.telstate
     capture_block_id = telstate["capture_block_id"]
     stream_name = telstate["stream_name"]
     chunk_info = telstate["chunk_info"]
@@ -242,7 +239,7 @@ class DataTreeFactory:
     weight_store = self.http_backed_weight_store(corr_data_store, autocorrs)
     flag_store = self.http_backed_store("flags")
 
-    sensor_cache = self._sensor_cache.instance
+    sensor_cache = self._data_products.instance.sensor_cache
     targets = sensor_cache["Observation/target"]
     scan_indices = sensor_cache["Observation/scan_index"]
     scan_states = sensor_cache["Observation/scan_state"]
