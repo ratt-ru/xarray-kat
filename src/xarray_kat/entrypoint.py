@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 
 from xarray_kat.datatree_factory import DataTreeFactory
-from xarray_kat.katdal_types import TelstateDataSource, sensor_cache_factory
+from xarray_kat.katdal_types import TelstateDataSource, TelstateDataProducts
 from xarray_kat.multiton import Multiton
 from xarray_kat.types import VanVleckLiteralType
 
@@ -89,9 +89,10 @@ class KatEntryPoint(BackendEntrypoint):
       stream_name=stream_name,
       van_vleck=van_vleck,
     )
-    sensor_cache = Multiton(sensor_cache_factory, datasource)
+
+    telstate_data_products = Multiton(TelstateDataProducts, datasource)
     endpoint = SplitResult(urlbits.scheme, urlbits.netloc, "", "", "").geturl()
     group_factory = DataTreeFactory(
-      datasource, sensor_cache, scan_states, van_vleck, endpoint, token
+      telstate_data_products, scan_states, van_vleck, endpoint, token
     )
     return group_factory.create()

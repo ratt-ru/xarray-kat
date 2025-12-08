@@ -1,4 +1,7 @@
+from katsdptelstate import TelescopeState
+
 from xarray_kat.multiton import Multiton
+from xarray_kat.third_party.vendored.katdal.applycal_minimal import CorrectionParams
 from xarray_kat.third_party.vendored.katdal.datasources_minimal import (
   TelstateDataSource,
 )
@@ -10,9 +13,22 @@ from xarray_kat.third_party.vendored.katdal.vis_flags_weights_minimal import (
 from xarray_kat.third_party.vendored.katdal.visdatav4_minimal import VisibilityDataV4
 
 
-def sensor_cache_factory(datasource: Multiton[TelstateDataSource]) -> SensorCache:
-  """Generate a katdal SensorCache.
+class TelstateDataProducts:
+  """"A proxy over the Telstate Data Products encapsulated in a katdal Dataset"""
+  def __init__(self, datasource:  Multiton[TelstateDataSource], **kw):
+    self._dataset = VisibilityDataV4(datasource.instance, **kw)
 
-  We call the katdal Dataset and appropriate the sensor member
-  """
-  return VisibilityDataV4(datasource.instance).sensor
+  @property
+  def datasource(self) -> TelstateDataSource:
+    """ Return the Telstate DataSource"""
+    return self._dataset.source
+
+  @property
+  def telstate(self) -> TelescopeState:
+    """ Return the TelescopeState"""
+    return self.datasource.telstate
+
+  @property
+  def sensor_cache(self) -> SensorCache:
+    """ Return the SensorCache"""
+    return self._dataset.sensor
