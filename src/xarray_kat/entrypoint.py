@@ -51,6 +51,7 @@ class KatEntryPoint(BackendEntrypoint):
     filename_or_obj,
     *,
     drop_variables=None,
+    applycal: str | Iterable[str] = "",
     scan_states: Iterable[str] = ("scan", "track"),
     capture_block_id: str | None = None,
     stream_name: str | None = None,
@@ -59,6 +60,7 @@ class KatEntryPoint(BackendEntrypoint):
     group_dicts = self.open_groups_as_dict(
       filename_or_obj,
       drop_variables=drop_variables,
+      applycal=applycal,
       scan_states=scan_states,
       capture_block_id=capture_block_id,
       stream_name=stream_name,
@@ -71,6 +73,7 @@ class KatEntryPoint(BackendEntrypoint):
     filename_or_obj: str | os.PathLike[Any] | BufferedIOBase | AbstractDataStore,
     *,
     drop_variables: str | Iterable[str] | None = None,
+    applycal: str | Iterable[str] = "",
     scan_states: Iterable[str] = ("scan", "track"),
     capture_block_id: str | None = None,
     stream_name: str | None = None,
@@ -90,7 +93,9 @@ class KatEntryPoint(BackendEntrypoint):
       van_vleck=van_vleck,
     )
 
-    telstate_data_products = Multiton(TelstateDataProducts, datasource)
+    telstate_data_products = Multiton(
+      TelstateDataProducts, datasource, applycal=applycal
+    )
     endpoint = SplitResult(urlbits.scheme, urlbits.netloc, "", "", "").geturl()
     group_factory = DataTreeFactory(
       telstate_data_products, scan_states, van_vleck, endpoint, token
