@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 
 from xarray_kat.datatree_factory import DataTreeFactory
-from xarray_kat.katdal_types import TelstateDataSource, TelstateDataProducts
+from xarray_kat.katdal_types import TelstateDataProducts, TelstateDataSource
 from xarray_kat.multiton import Multiton
 from xarray_kat.types import VanVleckLiteralType
 
