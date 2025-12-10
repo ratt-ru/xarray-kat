@@ -5,7 +5,7 @@ import re
 import time
 from datetime import datetime, timezone
 from importlib.metadata import version as importlib_version
-from typing import TYPE_CHECKING, Any, Dict, Iterable, Set
+from typing import TYPE_CHECKING, Dict, Iterable, Set
 
 import numpy as np
 import numpy.typing as npt
@@ -14,33 +14,13 @@ import xarray
 from xarray.core.indexing import LazilyIndexedArray
 
 from xarray_kat.array import CorrProductArray
-from xarray_kat.katdal_types import AutoCorrelationIndices, corrprod_to_autocorr
+from xarray_kat.katdal_types import corrprod_to_autocorr
 from xarray_kat.multiton import Multiton
-from xarray_kat.stores.base_store import base_virtual_store
-from xarray_kat.stores.http_store import http_store_factory
-from xarray_kat.stores.vis_store import vis_virtual_store
-from xarray_kat.stores.weight_store import scaled_weight_store
+from xarray_kat.stores.vis_weight_flag_store_factory import VisWeightFlagFactory
 from xarray_kat.types import VanVleckLiteralType
 
 if TYPE_CHECKING:
   from xarray_kat.katdal_types import TelstateDataProducts
-
-
-CACHE_SIZE = 100 * 1024 * 1024
-
-MISSING_VALUES = {
-  "correlator_data": 0j,
-  "flags": 1,
-  "weights": 0,
-  "weights_channel": 0.0,
-}
-
-DATA_TYPE_LABELS = {
-  "correlator_data": ("time", "frequency", "corrprod"),
-  "flags": ("time", "frequency", "corrprod"),
-  "weights": ("time", "frequency", "corrprod"),
-  "weights_channel": ("time", "frequency"),
-}
 
 CORRPROD_REGEX = re.compile(
   r"(?P<dish>[mMsSeE])(?P<number>\d+)(?P<polarization>[hHvV])"
@@ -119,63 +99,6 @@ class DataTreeFactory:
     self._endpoint = endpoint
     self._token = token
 
-  def get_context(self, spec: Dict[str, Any]) -> ts.Context:
-    return ts.Context(spec=ts.Context.Spec(spec))
-
-  def http_store(self, data_type: str) -> Multiton[ts.TensorStore]:
-    """Create an http kvstore with a path looking like ``1234567890_sdp_l0/correlator_data/``"""
-    chunk_info = self._data_products.instance.telstate["chunk_info"]
-    chunk_schema = chunk_info[data_type]
-    path = f"{chunk_schema['prefix']}/{data_type}/"
-    return Multiton(http_store_factory, self._endpoint, path, self._token, None)
-
-  def http_backed_store(self, data_type: str) -> Multiton[ts.TensorStore]:
-    """Create a virtual chunked tensorstore backed by an http kvstore
-    that pulls data off the MeerKAT archive"""
-    return Multiton(
-      base_virtual_store,
-      self.http_store(data_type),
-      self._data_products.instance.telstate["chunk_info"][data_type],
-      DATA_TYPE_LABELS[data_type],
-      MISSING_VALUES[data_type],
-      self.get_context({"cache_pool": {"total_bytes_limit": CACHE_SIZE}}),
-    )
-
-  def http_backed_vis_store(
-    self,
-    autocorrs: Multiton[AutoCorrelationIndices],
-    data_type: str = "correlator_data",
-  ) -> Multiton[ts.TensorStore]:
-    return Multiton(
-      vis_virtual_store,
-      self.http_store(data_type),
-      self._data_products.instance.telstate["chunk_info"][data_type],
-      DATA_TYPE_LABELS[data_type],
-      MISSING_VALUES[data_type],
-      autocorrs,
-      self._van_vleck,
-      self.get_context({"cache_pool": {"total_bytes_limit": CACHE_SIZE}}),
-    )
-
-  def http_backed_weight_store(
-    self,
-    vis_store: Multiton[ts.TensorStore],
-    autocorrs: Multiton[AutoCorrelationIndices],
-  ) -> Multiton[ts.TensorStore]:
-    telstate = self._data_products.instance.telstate
-
-    return Multiton(
-      scaled_weight_store,
-      self.http_backed_store("weights"),
-      self.http_backed_store("weights_channel"),
-      vis_store,
-      autocorrs,
-      telstate["chunk_info"],
-      telstate.get("needs_weight_power_scale", False),
-      DATA_TYPE_LABELS["correlator_data"],
-      self.get_context({"data_copy_concurrency": {"limit": 12}}),
-    )
-
   def create(self) -> Dict[str, xarray.Dataset]:
     telstate = self._data_products.instance.telstate
     capture_block_id = telstate["capture_block_id"]
@@ -235,9 +158,17 @@ class DataTreeFactory:
     ant2_names = np.array(cp_ant2_names[:: len(upols)], dtype=str)
     pols = np.array([HV_TO_LINEAR_MAP[p] for p in cp_pols[: len(upols)]], dtype=str)
 
-    corr_data_store = self.http_backed_vis_store(autocorrs)
-    weight_store = self.http_backed_weight_store(corr_data_store, autocorrs)
-    flag_store = self.http_backed_store("flags")
+    vfw_factory = VisWeightFlagFactory(
+      self._data_products,
+      autocorrs,
+      self._van_vleck,
+      self._endpoint,
+      self._token
+    )
+
+    corr_data_store = vfw_factory.vis()
+    weight_store = vfw_factory.weight()
+    flag_store = vfw_factory.flag()
 
     sensor_cache = self._data_products.instance.sensor_cache
     targets = sensor_cache["Observation/target"]

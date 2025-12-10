@@ -17,7 +17,7 @@ MEERKAT_F_ENGINE_OUTPUT_LEVELS = np.arange(-127.0, 128.0)
 LOOKUP_TABLES = Multiton(autocorr_lookup_table, MEERKAT_F_ENGINE_OUTPUT_LEVELS)
 
 
-def vis_virtual_store(
+def base_visibility_virtual_store(
   http_store: Multiton[ts.TensorStore],
   data_schema: Dict[str, Any],
   dim_labels: Tuple[str, ...],
