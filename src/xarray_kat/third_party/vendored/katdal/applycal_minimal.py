@@ -445,8 +445,11 @@ def add_applycal_sensors(
 
 
 if numba:
+
   @numba.jit(nopython=True, nogil=True)
-  def _correction_inputs_to_corrprods(g_per_cp, g_per_input, input1_index, input2_index):
+  def _correction_inputs_to_corrprods(
+    g_per_cp, g_per_input, input1_index, input2_index
+  ):
     """Convert gains per input to gains per correlation product."""
     for i in range(g_per_cp.shape[0]):
       for j in range(g_per_cp.shape[1]):
@@ -454,7 +457,10 @@ if numba:
           g_per_input[i, input2_index[j]]
         )
 else:
-  def _correction_inputs_to_corrprods(g_per_cp, g_per_input, input1_index, input2_index):
+
+  def _correction_inputs_to_corrprods(
+    g_per_cp, g_per_input, input1_index, input2_index
+  ):
     """Convert gains per input to gains per correlation product."""
     g_per_cp[:] = g_per_input[..., input1_index]
     g_per_cp *= np.conj(g_per_input[..., input2_index])

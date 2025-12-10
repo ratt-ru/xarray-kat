@@ -7,6 +7,7 @@ import tensorstore as ts
 from xarray_kat.katdal_types import AutoCorrelationIndices
 from xarray_kat.multiton import Multiton
 from xarray_kat.stores.base_store import read_array
+from xarray_kat.third_party.vendored.katdal.applycal_minimal import apply_vis_correction
 from xarray_kat.third_party.vendored.katdal.van_vleck import autocorr_lookup_table
 from xarray_kat.types import VanVleckLiteralType
 
@@ -24,7 +25,7 @@ def base_visibility_virtual_store(
   missing_value: Any,
   autocorrs: Multiton[AutoCorrelationIndices],
   van_vleck: VanVleckLiteralType,
-  context: ts.Context,
+  context: ts.Context | None,
 ) -> ts.TensorStore:
   """Creates a virtual_chunked TensorStore over a set of keys in an http_store.
 
@@ -94,6 +95,46 @@ def base_visibility_virtual_store(
       raise ValueError(f"Invalid van_vleck value {van_vleck}")
 
     return result.stamp
+
+  return ts.virtual_chunked(
+    read_function=read_chunk,
+    rank=len(shape),
+    domain=ts.IndexDomain(
+      [ts.Dim(size=s, label=ll) for s, ll in zip(shape, dim_labels)]
+    ),
+    dtype=dtype,
+    chunk_layout=ts.ChunkLayout(chunk_shape=[c[0] for c in chunks]),
+    context=context,
+  )
+
+
+def final_visibility_virtual_store(
+  base_vis_store: Multiton[ts.TensorStore],
+  calibration_solution_store: Multiton[ts.TensorStore] | None,
+  data_schema: Dict[str, Any],
+  dim_labels: Tuple[str, ...],
+  context: ts.Context | None,
+):
+  dtype = data_schema["dtype"]
+  chunks = data_schema["chunks"]
+  shape = tuple(sum(dc) for dc in chunks)
+  if not all(all(dc[0] == c for c in dc[1:-1]) for dc in chunks):
+    raise ValueError(f"{chunks} are not homogenous")
+
+  def read_chunk(
+    domain: ts.IndexDomain, array: np.ndarray, params: ts.VirtualChunkedReadParameters
+  ) -> ts.KvStore.TimestampedStorageGeneration:
+    vis_rr = base_vis_store.instance[domain].read()
+    vis_rr.force()
+
+    if calibration_solution_store is not None:
+      cal_rr = calibration_solution_store.instance[domain].read()
+      cal_rr.force()
+
+    array[:] = vis_rr.result()
+
+    if calibration_solution_store is not None:
+      apply_vis_correction(array, cal_rr.result())
 
   return ts.virtual_chunked(
     read_function=read_chunk,

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, Tuple
+from typing import TYPE_CHECKING, Tuple
 
 import numpy as np
 import tensorstore as ts
@@ -10,13 +10,13 @@ if TYPE_CHECKING:
   from xarray_kat.multiton import Multiton
 
 
-def correction_store(
+def calibration_solutions_store(
   data_products: Multiton[TelstateDataProducts],
-  chunk_info: Dict[str, Any],
   dim_labels: Tuple[str, ...],
   context: ts.Context,
 ):
   """A virtual array of complex calibration solutions"""
+  chunk_info = data_products.instance.telstate["chunk_info"]
   vis_chunks = chunk_info["correlator_data"]["chunks"]
   dtype = chunk_info["correlator_data"]["dtype"]
   vis_shape = tuple(sum(dc) for dc in vis_chunks)
@@ -31,8 +31,7 @@ def correction_store(
   def read_chunk(
     domain: ts.IndexDomain, array: np.ndarray, params: ts.VirtualChunkedReadParameters
   ) -> ts.KvStore.TimestampedStorageGeneration:
-    """This functions is a variant of applycal_minimal._correction_block"""
-
+    """This function is a variant of applycal_minimal._correction_block"""
     assert (cal_params := data_products.instance.calibration_params) is not None
 
     slices = domain.index_exp

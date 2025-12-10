@@ -98,6 +98,6 @@ class KatEntryPoint(BackendEntrypoint):
     )
     endpoint = SplitResult(urlbits.scheme, urlbits.netloc, "", "", "").geturl()
     group_factory = DataTreeFactory(
-      telstate_data_products, scan_states, van_vleck, endpoint, token
+      telstate_data_products, applycal, scan_states, van_vleck, endpoint, token
     )
     return group_factory.create()

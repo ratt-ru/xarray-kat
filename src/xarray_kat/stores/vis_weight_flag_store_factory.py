@@ -6,8 +6,13 @@ import tensorstore as ts
 
 from xarray_kat.multiton import Multiton
 from xarray_kat.stores.base_store import base_virtual_store
+from xarray_kat.stores.calibration import calibration_solutions_store
+from xarray_kat.stores.flag_store import final_flag_store
 from xarray_kat.stores.http_store import http_store_factory
-from xarray_kat.stores.visibility_stores import base_visibility_virtual_store
+from xarray_kat.stores.visibility_stores import (
+  base_visibility_virtual_store,
+  final_visibility_virtual_store,
+)
 from xarray_kat.stores.weight_store import scaled_weight_store
 
 if TYPE_CHECKING:
@@ -39,27 +44,31 @@ class VisWeightFlagFactory:
   at different times.
 
   """
+
   _data_products: Multiton[TelstateDataProducts]
   _autocorrs: Multiton[AutoCorrelationIndices]
+  _applycal: str
   _van_vleck: VanVleckLiteralType
   _applycal: str
   _endpoint: str
   _token: str | None
 
-  _vis: ts.TensorStore | None
-  _weight: ts.TensorStore | None
-  _flag: ts.TensorStore | None
+  _vis: Multiton[ts.TensorStore] | None
+  _weight: Multiton[ts.TensorStore] | None
+  _flag: Multiton[ts.TensorStore] | None
 
   def __init__(
     self,
     data_products: Multiton[TelstateDataProducts],
     autocorrs: Multiton[AutoCorrelationIndices],
+    applycal: str,
     van_vleck: VanVleckLiteralType,
     endpoint: str,
-    token: str | None = None
+    token: str | None = None,
   ):
     self._data_products = data_products
     self._autocorrs = autocorrs
+    self._applycal = applycal
     self._van_vleck = van_vleck
     self._endpoint = endpoint
     self._token = token
@@ -91,71 +100,87 @@ class VisWeightFlagFactory:
       self.get_context({"cache_pool": {"total_bytes_limit": CACHE_SIZE}}),
     )
 
-  def base_visibility_store(
-    self,
-    data_type: str = "correlator_data",
-  ) -> Multiton[ts.TensorStore]:
-    """Creates a base visibility store which may apply a Van Vleck correction."""
-    return Multiton(
+  def create(self):
+    telstate = self._data_products.instance.telstate
+
+    # Create the base visibility store
+    base_vis = Multiton(
       base_visibility_virtual_store,
-      self.http_store(data_type),
-      self._data_products.instance.telstate["chunk_info"][data_type],
-      DATA_TYPE_LABELS[data_type],
-      MISSING_VALUES[data_type],
+      self.http_store("correlator_data"),
+      telstate["chunk_info"]["correlator_data"],
+      DATA_TYPE_LABELS["correlator_data"],
+      MISSING_VALUES["correlator_data"],
       self._autocorrs,
       self._van_vleck,
       self.get_context({"cache_pool": {"total_bytes_limit": CACHE_SIZE}}),
     )
 
-  def final_weight_store(
-    self,
-    vis_store: Multiton[ts.TensorStore],
-    int_weights_store: Multiton[ts.TensorStore],
-    channel_weights_store: Multiton[ts.TensorStore],
-  ) -> Multiton[ts.TensorStore]:
-    telstate = self._data_products.instance.telstate
+    # Create the base integer and channel weights stores
+    base_int_weights = self.http_backed_store("weights")
+    base_chan_weights = self.http_backed_store("weights_channel")
 
-    return Multiton(
+    # Possibly create a calibration solutions store
+    # if applycal is configure
+    calibration_solutions: Multiton[ts.TensorStore] | None = None
+
+    if self._applycal:
+      calibration_solutions = (
+        Multiton(
+          calibration_solutions_store,
+          self._data_products,
+          ("time", "frequency", "corrprod"),
+          self.get_context({"cache_pool": {"total_bytes_limit": CACHE_SIZE}}),
+        ),
+      )
+
+    # Create a top level context for performing data copies
+    top_level_thread_ctx = self.get_context({"data_copy_concurrency": {"limit": 12}})
+
+    # Create the top level weight store
+    self._weight = Multiton(
       scaled_weight_store,
-      int_weights_store,
-      channel_weights_store,
-      vis_store,
+      base_int_weights,
+      base_chan_weights,
+      base_vis,
+      calibration_solutions,
       self._autocorrs,
       telstate["chunk_info"],
       telstate.get("needs_weight_power_scale", False),
       DATA_TYPE_LABELS["correlator_data"],
-      self.get_context({"data_copy_concurrency": {"limit": 12}}),
+      top_level_thread_ctx,
     )
 
-  def create(self):
-    if self._vis is None:
-      self._vis = self.base_visibility_store()
+    # Create the top level visibility store
+    self._vis = Multiton(
+      final_visibility_virtual_store,
+      base_vis,
+      calibration_solutions,
+      telstate["chunk_info"]["correlator_data"],
+      DATA_TYPE_LABELS["correlator_data"],
+      top_level_thread_ctx,
+    )
 
-    if self._weight is None:
-      base_int_weights = self.http_backed_store("weights")
-      base_chan_weights = self.http_backed_store("weights_channel")
-      self._weight = self.final_weight_store(
-        self._vis,
-        base_int_weights,
-        base_chan_weights
-      )
+    # Create the top level flag store
+    self._flag = Multiton(
+      final_flag_store,
+      self.http_backed_store("flags"),
+      calibration_solutions,
+      top_level_thread_ctx,
+    )
 
-    if self._flag is None:
-      self._flag = self.http_backed_store("flags")
-
-  def vis(self):
+  def vis(self) -> Multiton[ts.TensorStore]:
     if self._vis is None:
       self.create()
 
     return self._vis
 
-  def weight(self):
+  def weight(self) -> Multiton[ts.TensorStore]:
     if self._weight is None:
       self.create()
 
     return self._weight
 
-  def flag(self):
+  def flag(self) -> Multiton[ts.TensorStore]:
     if self._flag is None:
       self.create()
 

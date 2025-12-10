@@ -81,6 +81,7 @@ def _index_store(store: Multiton[ts.TensorStore], index) -> ts.TensorStore:
 class DataTreeFactory:
   _data_products: Multiton[TelstateDataProducts]
   _scan_states: Set[str]
+  _applycal: str
   _van_vleck: VanVleckLiteralType
   _endpoint: str
   _token: str | None
@@ -88,12 +89,14 @@ class DataTreeFactory:
   def __init__(
     self,
     data_products: Multiton[TelstateDataProducts],
+    applycal: str,
     scan_states: Iterable[str],
     van_vleck: VanVleckLiteralType,
     endpoint: str,
     token: str | None = None,
   ):
     self._data_products = data_products
+    self._applycal = applycal
     self._scan_states = set(scan_states)
     self._van_vleck = van_vleck
     self._endpoint = endpoint
@@ -161,9 +164,10 @@ class DataTreeFactory:
     vfw_factory = VisWeightFlagFactory(
       self._data_products,
       autocorrs,
+      self._applycal,
       self._van_vleck,
       self._endpoint,
-      self._token
+      self._token,
     )
 
     corr_data_store = vfw_factory.vis()
