@@ -97,6 +97,11 @@ class ComparableArrayWrapper:
 
   def __hash__(self):
     """If the underlying object is hashable, the wrapper is too."""
+    if isinstance(a := self.unwrapped, np.ndarray):
+      # TODO(sjperkins) It may be useful to
+      # include flags at a later stage
+      return hash((a.dtype, a.shape, a.tobytes()))
+
     return hash(self.unwrapped)
 
   @staticmethod
