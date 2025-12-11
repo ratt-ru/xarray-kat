@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Dict
+import multiprocessing as mp
 
 import tensorstore as ts
 
@@ -39,12 +40,10 @@ DATA_TYPE_LABELS = {
 class VisWeightFlagFactory:
   """Generates TensorStores representing visibilities, weights and flags.
 
-  The final values in each stores are interdependent on each other and
+  The final values in each store are interdependent on each other and
   require the construction of base stores that apply data transformations
-  at different times.
-
+  at different points.
   """
-
   _data_products: Multiton[TelstateDataProducts]
   _autocorrs: Multiton[AutoCorrelationIndices]
   _applycal: str
@@ -132,7 +131,7 @@ class VisWeightFlagFactory:
       )
 
     # Create a top level context for performing data copies
-    top_level_thread_ctx = self.get_context({"data_copy_concurrency": {"limit": 12}})
+    top_level_thread_ctx = self.get_context({"data_copy_concurrency": {"limit": mp.cpu_count()}})
 
     # Create the top level weight store
     self._weight = Multiton(
