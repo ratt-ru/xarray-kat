@@ -123,14 +123,12 @@ class VisWeightFlagFactory:
     # if applycal is configure
     calibration_solutions: Multiton[ts.TensorStore] | None = None
 
-    if self._applycal:
-      calibration_solutions = (
-        Multiton(
-          calibration_solutions_store,
-          self._data_products,
-          ("time", "frequency", "corrprod"),
-          self.get_context({"cache_pool": {"total_bytes_limit": CACHE_SIZE}}),
-        ),
+    if self._data_products.instance.calibration_params is not None:
+      calibration_solutions = Multiton(
+        calibration_solutions_store,
+        self._data_products,
+        ("time", "frequency", "corrprod"),
+        self.get_context({"cache_pool": {"total_bytes_limit": CACHE_SIZE}}),
       )
 
     # Create a top level context for performing data copies
