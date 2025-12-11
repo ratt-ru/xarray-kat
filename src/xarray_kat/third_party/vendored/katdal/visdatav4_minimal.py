@@ -26,6 +26,7 @@ from xarray_kat.third_party.vendored.katdal.applycal_minimal import (
   CAL_PRODUCT_TYPES,
   INVALID_GAIN,
   add_applycal_sensors,
+  calc_correction,
 )
 from xarray_kat.third_party.vendored.katdal.categorical import (
   CategoricalData,
@@ -572,42 +573,30 @@ class VisibilityDataV4(DataSet):
     normalised_cal_products, skip_missing_products = _normalise_cal_products(
       applycal, cal_freqs.keys()
     )
-    if not self.source.data or not normalised_cal_products:
-      self._corrections = None
-      self._corrected = self.source.data
-    else:
-      # Calibration solutions still depend on dask at this point
-      self._corrections = NotImplemented
-      self._corrected = NotImplemented
-      """
-            freqs = self.spectral_windows[0].channel_freqs
-            corrprods = self.subarrays[self.subarray].corr_products
-            self.applycal_products, self._corrections = calc_correction(
-                self.source.data.vis.chunks, self.sensor, corrprods,
-                normalised_cal_products, freqs, cal_freqs, skip_missing_products)
-            if self._corrections is None:
-                self._corrected = self.source.data
-            else:
-                corrected_vis = self._make_corrected(apply_vis_correction,
-                                                     self.source.data.vis)
-                corrected_flags = self._make_corrected(apply_flags_correction,
-                                                       self.source.data.flags)
-                corrected_weights = self._make_corrected(apply_weights_correction,
-                                                         self.source.data.weights)
-                unscaled_weights = self.source.data.unscaled_weights
-                # Acknowledge that the applycal step is making the L1 product
-                cal_streams = {cp.split('.')[0] for cp in self.applycal_products}
-                if 'sdp_l0' in self.name and 'l1' in cal_streams:
-                    self.name = self.name.replace('sdp_l0', 'sdp_l1')
-                    if 'l2' in cal_streams:
-                        self.name = self.name.replace('sdp_l1', 'sdp_l2')
-                self._corrected = VisFlagsWeights(corrected_vis, corrected_flags,
-                                                  corrected_weights, unscaled_weights)
-            """
 
-    # Apply default selection and initialise all members that depend
-    # on selection in the process
-    self.select(spw=0, subarray=0, ants=obs_ants)
+    if not normalised_cal_products:
+      self.calibration_params = None
+    else:
+      freqs = self.spectral_windows[0].channel_freqs
+      corrprods = self.subarrays[self.subarray].corr_products
+      vis_chunks = self.source.telstate["chunk_info"]["correlator_data"]["chunks"]
+      self.applycal_products, self.calibration_params = calc_correction(
+        vis_chunks,
+        self.sensor,
+        corrprods,
+        normalised_cal_products,
+        freqs,
+        cal_freqs,
+        skip_missing_products,
+      )
+
+      if self.calibration_params is not None:
+        # Acknowledge that the applycal step is making the L1 product
+        cal_streams = {cp.split(".")[0] for cp in self.applycal_products}
+        if "sdp_l0" in self.name and "l1" in cal_streams:
+          self.name = self.name.replace("sdp_l0", "sdp_l1")
+          if "l2" in cal_streams:
+            self.name = self.name.replace("sdp_l1", "sdp_l2")
 
   def _register_standard_cal_streams(self, gaincal_flux):
     """Find L1 and L2 cal streams and register their virtual sensors."""

@@ -5,6 +5,9 @@ from typing import TYPE_CHECKING, Any, Dict, Tuple
 import numpy as np
 import tensorstore as ts
 
+from xarray_kat.third_party.vendored.katdal.applycal_minimal import (
+  apply_weights_correction,
+)
 from xarray_kat.third_party.vendored.katdal.vis_flags_weights_minimal import (
   weight_power_scale,
 )
@@ -18,11 +21,12 @@ def scaled_weight_store(
   int_weights_store: Multiton[ts.TensorStore],
   channel_weights_store: Multiton[ts.TensorStore],
   vis_store: Multiton[ts.TensorStore],
+  cal_solutions_store: Multiton[ts.TensorStore] | None,
   autocorrs: Multiton[AutoCorrelationIndices],
   chunk_info: Dict[str, Any],
   apply_scaling: bool,
   dim_labels: Tuple[str, ...],
-  context: ts.Context,
+  context: ts.Context | None,
 ):
   """Combines weights and channel_weights and scales the weights
   by the visibility auto-correlations
@@ -31,6 +35,9 @@ def scaled_weight_store(
     int_weights_store: uint8 weights TensorStore of shape ``(time, frequency, corrprod)``.
     channel_weights_store: float32 weights TensorStore of shape ``(time, frequency)``.
     vis_store: complex visibility TensorStore of shape ``(time, frequency, corrprod)``.
+    cal_solutions_store: complex calibration solution TensorStore of shape
+      ``(time, frequency, corrprod)``. If None, calibration solutions
+      will not be applied.
     autocorrs: Autocorrelation indices mapping.
     chunk_info: telstate chunk info dictionary
     apply_scaling: bool whether scaling should be applied or reversed.
@@ -56,11 +63,16 @@ def scaled_weight_store(
 
     # Issue reads to the underlying stores
     int_weights_rr = iws[domain].read()
-    channel_weights_rr = cws[domain[:-1]].read()
-    vis_rr = vis_store.instance[domain].read()
     int_weights_rr.force()
+    channel_weights_rr = cws[domain[:-1]].read()
     channel_weights_rr.force()
+    vis_rr = vis_store.instance[domain].read()
     vis_rr.force()
+
+    if cal_solutions_store is not None:
+      cal_rr = cal_solutions_store.instance[domain].read()
+      cal_rr.force()
+
     weights = int_weights_rr.result()
     weights *= channel_weights_rr.result()[..., None]
 
@@ -72,6 +84,9 @@ def scaled_weight_store(
       autocorrs.instance.index2,
       divide=apply_scaling,
     )
+
+    if cal_solutions_store is not None:
+      apply_weights_correction(array, cal_rr.result())
 
   return ts.virtual_chunked(
     read_function=read_chunk,

@@ -101,3 +101,8 @@ class Multiton(Generic[T]):
   def release(self) -> None:
     """Release the instance held by this Multiton."""
     self._instance = None
+
+  def __str__(self) -> str:
+    return f"Multiton({self._factory})"
+
+  __repr__ = __str__

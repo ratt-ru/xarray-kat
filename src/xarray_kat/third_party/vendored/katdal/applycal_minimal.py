@@ -7,11 +7,18 @@ from xarray_kat.third_party.vendored.katdal.categorical import (
   CategoricalData,
   ComparableArrayWrapper,
 )
+from xarray_kat.third_party.vendored.katdal.flags import POSTPROC
 from xarray_kat.third_party.vendored.katdal.sensordata import (
   SensorGetter,
   SimpleSensorGetter,
 )
 from xarray_kat.third_party.vendored.katdal.spectral_window import SpectralWindow
+
+try:
+  import numba
+except ImportError:
+  numba = None
+
 
 # A constant indicating invalid / absent gain (typically due to flagged data)
 INVALID_GAIN = np.complex64(complex(np.nan, np.nan))
@@ -435,3 +442,303 @@ def add_applycal_sensors(
   template = f"Calibration/Corrections/{cal_stream}/{{product_type}}/{{inp}}"
   cache.virtual[template] = calc_correction_per_input
   return cal_freqs
+
+
+if numba:
+
+  @numba.jit(nopython=True, nogil=True)
+  def _correction_inputs_to_corrprods(
+    g_per_cp, g_per_input, input1_index, input2_index
+  ):
+    """Convert gains per input to gains per correlation product."""
+    for i in range(g_per_cp.shape[0]):
+      for j in range(g_per_cp.shape[1]):
+        g_per_cp[i, j] = g_per_input[i, input1_index[j]] * np.conj(
+          g_per_input[i, input2_index[j]]
+        )
+else:
+
+  def _correction_inputs_to_corrprods(
+    g_per_cp, g_per_input, input1_index, input2_index
+  ):
+    """Convert gains per input to gains per correlation product."""
+    g_per_cp[:] = g_per_input[..., input1_index]
+    g_per_cp *= np.conj(g_per_input[..., input2_index])
+
+
+class CorrectionParams:
+  """Data needed to compute corrections in :func:`calc_correction_per_corrprod`.
+
+  Once constructed, the data in this class must not be modified, as it will
+  be baked into dask graphs.
+
+  Parameters
+  ----------
+  inputs : list of str
+      Names of inputs, in the same order as the input axis of products
+  input1_index, input2_index : array of int
+      Indices into `inputs` of first and second items of correlation product
+  corrections : dict
+      A dictionary (indexed by cal product name) of lists (indexed
+      by input) of sequences (indexed by dump) of numpy arrays, with
+      corrections to apply.
+  channel_maps : dict
+      A dictionary (indexed by cal product name) of functions (signature
+      `g = channel_map(g, channels)`) that map the frequency axis of the
+      cal product `g` onto the frequency axis of the visibility data, where
+      the vis frequency axis will be indexed by the slice `channels`.
+  """
+
+  def __init__(self, inputs, input1_index, input2_index, corrections, channel_maps):
+    self.inputs = inputs
+    self.input1_index = input1_index
+    self.input2_index = input2_index
+    self.corrections = corrections
+    self.channel_maps = channel_maps
+
+
+def calc_correction_per_corrprod(dump, channels, params):
+  """Gain correction per channel per correlation product for a given dump.
+
+  This calculates an array of complex gain correction terms of shape
+  (n_chans, n_corrprods) that can be directly applied to visibility data.
+  This incorporates all requested calibration products at the specified
+  dump and channels.
+
+  Parameters
+  ----------
+  dump : int
+      Dump index (applicable to full data set, i.e. absolute)
+  channels : slice
+      Channel indices (applicable to full data set, i.e. absolute)
+  params : :class:`CorrectionParams`
+      Corrections per input, together with correlation product indices
+
+  Returns
+  -------
+  gains : array of complex64, shape (n_chans, n_corrprods)
+      Gain corrections per channel per correlation product
+
+  Raises
+  ------
+  KeyError
+      If input and/or cal product has no associated correction
+  """
+  n_channels = channels.stop - channels.start
+  g_per_input = np.ones((len(params.inputs), n_channels), dtype="complex64")
+  for cal_product, product_corrections in params.corrections.items():
+    channel_map = params.channel_maps[cal_product]
+    for i in range(len(params.inputs)):
+      sensor = product_corrections[i]
+      g_per_channel = sensor[dump]
+      g_per_input[i] *= channel_map(g_per_channel, channels)
+  # Transpose to (channel, input) order, and ensure C ordering
+  g_per_input = np.ascontiguousarray(g_per_input.T)
+  g_per_cp = np.empty((n_channels, len(params.input1_index)), dtype="complex64")
+  _correction_inputs_to_corrprods(
+    g_per_cp, g_per_input, params.input1_index, params.input2_index
+  )
+  return g_per_cp
+
+
+def _correction_block(block_info, params):
+  """Calculate applycal correction for a single time-freq-baseline chunk."""
+  slices = tuple(slice(*loc) for loc in block_info[None]["array-location"])
+  block_shape = block_info[None]["chunk-shape"]
+  correction = np.empty(block_shape, np.complex64)
+  # TODO: make calc_correction_per_corrprod multi-dump aware
+  for n, dump in enumerate(range(slices[0].start, slices[0].stop)):
+    correction[n] = calc_correction_per_corrprod(dump, slices[1], params)
+  return correction
+
+
+def calc_correction(
+  chunks,
+  cache,
+  corrprods,
+  cal_products,
+  data_freqs,
+  all_cal_freqs,
+  skip_missing_products=False,
+):
+  """Create a dask array containing applycal corrections.
+
+  Parameters
+  ----------
+  chunks : tuple of tuple of int
+      Chunking scheme of the resulting array, in normalized form (see
+      :func:`dask.array.core.normalize_chunks`).
+  cache : :class:`~katdal.sensordata.SensorCache` object
+      Sensor cache, used to look up individual correction sensors
+  corrprods : sequence of (string, string)
+      Selected correlation products as pairs of correlator input labels
+  cal_products : sequence of string
+      Calibration products that will contribute to corrections (e.g. ["l1.G"])
+  data_freqs : array of float, shape (*F*,)
+      Centre frequency of each frequency channel of visibilities, in Hz
+  all_cal_freqs : dict
+      Dictionary mapping cal stream name (e.g. "l1") to array of associated
+      frequencies
+  skip_missing_products : bool
+      If True, skip products with missing sensors instead of raising KeyError
+
+  Returns
+  -------
+  final_cal_products : list of string
+      List of calibration products in the order that they will be applied
+      (potentially a subset of `cal_products` if skipping missing products)
+  corrections: CorrectionParams, or None
+      Parameters that produces corrections, , or `None` if
+      no calibration products were found (either `cal_products` is empty or all
+      products had some missing sensors and `skip_missing_products` is True)
+
+  Raises
+  ------
+  KeyError
+      If a correction sensor for a given input and cal product is not found
+      (and `skip_missing_products` is False)
+  """
+  shape = tuple(sum(bd) for bd in chunks)
+  if len(chunks[2]) > 1:
+    logger.warning("ignoring chunking on baseline axis")
+    chunks = (chunks[0], chunks[1], (shape[2],))
+  inputs = sorted(set(np.ravel(corrprods)))
+  input1_index = np.array([inputs.index(cp[0]) for cp in corrprods])
+  input2_index = np.array([inputs.index(cp[1]) for cp in corrprods])
+  corrections = {}
+  channel_maps = {}
+  for cal_product in cal_products:
+    cal_stream, product_type = _parse_cal_product(cal_product)
+    sensor_prefix = f"Calibration/Corrections/{cal_stream}/{product_type}/"
+    corrections_per_product = []
+    for i, inp in enumerate(inputs):
+      try:
+        sensor = cache.get(sensor_prefix + inp)
+      except KeyError:
+        if skip_missing_products:
+          break
+        else:
+          raise
+      # Indexing CategoricalData by dump is relatively slow (tens of
+      # microseconds), so expand it into a plain-old Python list.
+      if isinstance(sensor, CategoricalData):
+        data = [None] * sensor.events[-1]
+        for s, v in sensor.segments():
+          for j in range(s.start, s.stop):
+            data[j] = v
+      else:
+        data = sensor
+      corrections_per_product.append(data)
+    else:
+      corrections[cal_product] = corrections_per_product
+      # Frequency configuration for *stream* (not necessarily for product)
+      cal_stream_freqs = all_cal_freqs[cal_stream]
+      # Get number of frequency channels of *corrections* by inspecting it
+      # at first dump for each input and picking max to reject bad inputs.
+      # Expected to be either 1, len(cal_stream_freqs) or len(data_freqs).
+      correction_n_chans = max(
+        [
+          len(np.atleast_1d(corr_per_input[0]))
+          for corr_per_input in corrections_per_product
+        ]
+      )
+      if correction_n_chans == 1:
+        # Scalar values will be broadcast by NumPy - no slicing required
+        channel_maps[cal_product] = lambda g, channels: g
+      elif correction_n_chans == len(data_freqs) and (
+        # This test indicates that correction frequencies either differ
+        # from those of cal stream (i.e. already interpolated), or the
+        # cal stream matches the data freqs to within 1 mHz anyway.
+        len(cal_stream_freqs) != len(data_freqs)
+        or np.allclose(cal_stream_freqs, data_freqs, rtol=0, atol=1e-3)
+      ):
+        # Corrections are already lined up with data - slice directly
+        channel_maps[cal_product] = lambda g, channels: g[channels]
+      else:
+        # Pick closest cal channel for each data channel
+        expand = np.abs(
+          data_freqs[:, np.newaxis] - cal_stream_freqs[np.newaxis, :]
+        ).argmin(axis=-1)
+        channel_maps[cal_product] = lambda g, channels: g[expand[channels]]
+  final_cal_products = list(corrections.keys())
+  if not final_cal_products:
+    return final_cal_products, None
+  params = CorrectionParams(
+    inputs, input1_index, input2_index, corrections, channel_maps
+  )
+  return final_cal_products, params
+  name = "corrections[{}]".format(",".join(sorted(final_cal_products)))
+  return (
+    final_cal_products,
+    da.map_blocks(
+      _correction_block, dtype=np.complex64, chunks=chunks, name=name, params=params
+    ),
+  )
+
+
+if not numba:
+  """ Slower numpy variants """
+
+  def apply_vis_correction(data, correction):
+    """Clean up and apply `correction` to visibility data in `data`."""
+    out = np.copy(data)
+    mask = np.isnan(correction)
+    out[mask] *= correction[mask]
+    return out
+
+  def apply_weights_correction(data, correction):
+    """Clean up and apply `correction` to weight data in `data`."""
+    out = np.copy(data)
+    correction_sqrd = correction.real**2 + correction.imag**2
+    mask = np.isnan(correction_sqrd)
+    out[mask] /= correction_sqrd[mask]
+    out[~mask] = 0
+    return out
+
+  def apply_flags_correction(data, correction):
+    """Set POSTPROC flag wherever `correction` is invalid."""
+    out = np.copy(data)
+    out[np.isnan(correction)] |= POSTPROC
+    return out
+else:
+  """ Faster numba variants """
+
+  @numba.jit(nopython=True, nogil=True)
+  def apply_vis_correction(data, correction):
+    """Clean up and apply `correction` to visibility data in `data`."""
+    out = np.empty_like(data)
+    for i in range(out.shape[0]):
+      for j in range(out.shape[1]):
+        for k in range(out.shape[2]):
+          c = correction[i, j, k]
+          if not np.isnan(c):
+            out[i, j, k] = data[i, j, k] * c
+          else:
+            out[i, j, k] = data[i, j, k]
+    return out
+
+  @numba.jit(nopython=True, nogil=True)
+  def apply_weights_correction(data, correction):
+    """Clean up and apply `correction` to weight data in `data`."""
+    out = np.empty_like(data)
+    for i in range(out.shape[0]):
+      for j in range(out.shape[1]):
+        for k in range(out.shape[2]):
+          cc = correction[i, j, k]
+          c = cc.real * cc.real + cc.imag * cc.imag
+          if c > 0:  # Will be false if c is NaN
+            out[i, j, k] = data[i, j, k] / c
+          else:
+            out[i, j, k] = 0
+    return out
+
+  @numba.jit(nopython=True, nogil=True)
+  def apply_flags_correction(data, correction):
+    """Set POSTPROC flag wherever `correction` is invalid."""
+    out = np.copy(data)
+    for i in range(out.shape[0]):
+      for j in range(out.shape[1]):
+        for k in range(out.shape[2]):
+          if np.isnan(correction[i, j, k]):
+            out[i, j, k] |= POSTPROC
+    return out

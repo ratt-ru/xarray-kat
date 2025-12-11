@@ -3,6 +3,7 @@ Changelog
 
 X.Y.Z (DD-MM-YYY)
 -----------------
+* Apply calibration solutions (:pr:`30`)
 * Encapsulate Telescope Data Products into a single class (:pr:`29`)
 * Elide TelstateDatasource argument to scaled weight store (:pr:`28`)
 * Rename GroupFactory to DataTreeFactory (:pr:`27`)

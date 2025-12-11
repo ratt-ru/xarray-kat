@@ -1,6 +1,7 @@
 from katsdptelstate import TelescopeState
 
 from xarray_kat.multiton import Multiton
+from xarray_kat.third_party.vendored.katdal.applycal_minimal import CorrectionParams
 from xarray_kat.third_party.vendored.katdal.datasources_minimal import (
   TelstateDataSource,
 )
@@ -19,6 +20,11 @@ class TelstateDataProducts:
     self._dataset = VisibilityDataV4(datasource.instance, **kw)
 
   @property
+  def name(self):
+    """Return the underlying dataset name"""
+    return self._dataset.name
+
+  @property
   def datasource(self) -> TelstateDataSource:
     """Return the Telstate DataSource"""
     return self._dataset.source
@@ -32,3 +38,8 @@ class TelstateDataProducts:
   def sensor_cache(self) -> SensorCache:
     """Return the SensorCache"""
     return self._dataset.sensor
+
+  @property
+  def calibration_params(self) -> CorrectionParams | None:
+    """Return the Calibration Parameters"""
+    return self._dataset.calibration_params

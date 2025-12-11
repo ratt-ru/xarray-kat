@@ -153,4 +153,38 @@ else:
   def weight_power_scale(
     vis, weights, auto_indices, index1, index2, out=None, divide=True
   ):
-    raise NotImplementedError("pure numpy weight_power_scale")
+    """Divide (or multiply) weights by autocorrelations (ndarray version).
+
+    The weight associated with visibility (i,j) is divided (or multiplied) by
+    the corresponding real visibilities (i,i) and (j,j).
+
+    This function is designed to be usable with :func:`dask.array.blockwise`.
+
+    Parameters
+    ----------
+    vis : np.ndarray
+        Chunk of visibility data, with dimensions time, frequency, baseline
+        (or any two dimensions then baseline). It must contain all the
+        baselines of a stream, even though only the autocorrelations are used.
+    weights : np.ndarray
+        Chunk of weight data, with the same shape as `vis`
+    auto_indices, index1, index2 : np.ndarray
+        Arrays returned by :func:`corrprod_to_autocorr`
+    out : np.ndarray, optional
+        If specified, the output array, with same shape as `vis` and
+        dtype ``np.float32``
+    divide : bool, optional
+        True if weights will be divided by autocorrelations, otherwise
+        they will be multiplied
+    """
+    autocorr = vis[..., auto_indices].real
+    autoscale = np.reciprocal(autocorr) if divide else autocorr
+    power = autoscale[..., index1]
+    power *= autoscale[..., index2]
+    power[~np.isfinite(power)] = np.float32(2.0**-32)
+    if out is None:
+      out = np.copy(weights)
+    else:
+      out[:] = weights
+    out *= power
+    return out
