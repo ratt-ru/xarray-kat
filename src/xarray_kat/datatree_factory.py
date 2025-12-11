@@ -283,6 +283,6 @@ class DataTreeFactory:
         },
       )
 
-      tree[f"{capture_block_id}_{stream_name}_{i:03d}"] = ds
+      tree[f"{self._data_products.instance.name}_{i:03d}"] = ds
 
     return tree

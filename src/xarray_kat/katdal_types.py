@@ -20,6 +20,11 @@ class TelstateDataProducts:
     self._dataset = VisibilityDataV4(datasource.instance, **kw)
 
   @property
+  def name(self):
+    """Return the underlying dataset name"""
+    return self._dataset.name
+
+  @property
   def datasource(self) -> TelstateDataSource:
     """Return the Telstate DataSource"""
     return self._dataset.source
