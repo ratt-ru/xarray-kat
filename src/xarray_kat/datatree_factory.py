@@ -81,7 +81,7 @@ def _index_store(store: Multiton[ts.TensorStore], index) -> ts.TensorStore:
 class DataTreeFactory:
   _data_products: Multiton[TelstateDataProducts]
   _scan_states: Set[str]
-  _applycal: str
+  _applycal: str | Iterable[str]
   _van_vleck: VanVleckLiteralType
   _endpoint: str
   _token: str | None
@@ -89,7 +89,7 @@ class DataTreeFactory:
   def __init__(
     self,
     data_products: Multiton[TelstateDataProducts],
-    applycal: str,
+    applycal: str | Iterable[str],
     scan_states: Iterable[str],
     van_vleck: VanVleckLiteralType,
     endpoint: str,

@@ -116,7 +116,7 @@ def final_visibility_virtual_store(
   context: ts.Context | None,
 ):
   """Creates a virtual_chunked TensorStore that derives its
-  values from a base visibility store and, possibly a calibration solution store. """
+  values from a base visibility store and, possibly a calibration solution store."""
   dtype = data_schema["dtype"]
   chunks = data_schema["chunks"]
   shape = tuple(sum(dc) for dc in chunks)

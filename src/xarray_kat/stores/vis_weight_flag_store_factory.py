@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict
 import multiprocessing as mp
+from typing import TYPE_CHECKING, Any, Dict, Iterable, cast
 
 import tensorstore as ts
 
@@ -44,11 +44,11 @@ class VisWeightFlagFactory:
   require the construction of base stores that apply data transformations
   at different points.
   """
+
   _data_products: Multiton[TelstateDataProducts]
   _autocorrs: Multiton[AutoCorrelationIndices]
-  _applycal: str
+  _applycal: str | Iterable[str]
   _van_vleck: VanVleckLiteralType
-  _applycal: str
   _endpoint: str
   _token: str | None
 
@@ -60,7 +60,7 @@ class VisWeightFlagFactory:
     self,
     data_products: Multiton[TelstateDataProducts],
     autocorrs: Multiton[AutoCorrelationIndices],
-    applycal: str,
+    applycal: str | Iterable[str],
     van_vleck: VanVleckLiteralType,
     endpoint: str,
     token: str | None = None,
@@ -131,7 +131,9 @@ class VisWeightFlagFactory:
       )
 
     # Create a top level context for performing data copies
-    top_level_thread_ctx = self.get_context({"data_copy_concurrency": {"limit": mp.cpu_count()}})
+    top_level_thread_ctx = self.get_context(
+      {"data_copy_concurrency": {"limit": mp.cpu_count()}}
+    )
 
     # Create the top level weight store
     self._weight = Multiton(
@@ -169,16 +171,16 @@ class VisWeightFlagFactory:
     if self._vis is None:
       self.create()
 
-    return self._vis
+    return cast(Multiton[ts.TensorStore], self._vis)
 
   def weight(self) -> Multiton[ts.TensorStore]:
     if self._weight is None:
       self.create()
 
-    return self._weight
+    return cast(Multiton[ts.TensorStore], self._weight)
 
   def flag(self) -> Multiton[ts.TensorStore]:
     if self._flag is None:
       self.create()
 
-    return self._flag
+    return cast(Multiton[ts.TensorStore], self._flag)

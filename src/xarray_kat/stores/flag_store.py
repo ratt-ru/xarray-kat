@@ -22,6 +22,7 @@ def final_flag_store(
   """Creates a TensorStore representing flagged values.
   These are inherited from the base flag store, with optional
   calibration solutions applied"""
+
   def read_chunk(
     domain: ts.IndexDomain, array: np.ndarray, params: ts.VirtualChunkedReadParameters
   ) -> ts.KvStore.TimestampedStorageGeneration:
