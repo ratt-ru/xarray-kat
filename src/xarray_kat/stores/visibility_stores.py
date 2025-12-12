@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 import logging
-from typing import Any, Dict, Tuple
+from typing import TYPE_CHECKING
 
 import numpy as np
 import tensorstore as ts
@@ -11,6 +13,9 @@ from xarray_kat.third_party.vendored.katdal.applycal_minimal import apply_vis_co
 from xarray_kat.third_party.vendored.katdal.van_vleck import autocorr_lookup_table
 from xarray_kat.types import VanVleckLiteralType
 
+if TYPE_CHECKING:
+  from xarray_kat.types import ArchiveArrayMetadata
+
 log = logging.getLogger(__name__)
 
 # Default MeerKAT F-engine levels
@@ -20,9 +25,7 @@ LOOKUP_TABLES = Multiton(autocorr_lookup_table, MEERKAT_F_ENGINE_OUTPUT_LEVELS)
 
 def base_visibility_virtual_store(
   http_store: Multiton[ts.TensorStore],
-  data_schema: Dict[str, Any],
-  dim_labels: Tuple[str, ...],
-  missing_value: Any,
+  array_metadata: ArchiveArrayMetadata,
   autocorrs: Multiton[AutoCorrelationIndices],
   van_vleck: VanVleckLiteralType,
   context: ts.Context | None,
@@ -31,13 +34,7 @@ def base_visibility_virtual_store(
 
   Args:
     http_store: A http KvStore. It's path should be set to
-    data_schema: Dictionary derived from telstate described the
-      schema of this array, in particular it's data type (dtype)
-      and chunking (chunks).
-    dim_labels: The labels associated with each dimension of
-      the data
-    missing_value: Value substituted for the portion of the
-      store corresponding to a missing key in the http KvStore.
+    array_metadata: Archive array metadata
     corrprods: Correlation product array derived from telstate
     van_vleck: Literal controlling application of Van Vleck Corrections.
     context: TensorStore context to associate with the returned store.
@@ -46,11 +43,7 @@ def base_visibility_virtual_store(
     A TensorStore representing visibility data, possibly with
     Van Vleck Corrections applied.
   """
-  dtype = data_schema["dtype"]
-  chunks = data_schema["chunks"]
-  shape = tuple(sum(dc) for dc in chunks)
-  if not all(all(dc[0] == c for c in dc[1:-1]) for dc in chunks):
-    raise ValueError(f"{chunks} are not homogenous")
+  default_value = array_metadata.default
 
   def read_chunk(
     domain: ts.IndexDomain, array: np.ndarray, params: ts.VirtualChunkedReadParameters
@@ -75,8 +68,8 @@ def base_visibility_virtual_store(
 
     # Fill with defaults if retrieval failed
     if data is None:
-      log.warning("Defaulting to %s for missing key %s", missing_value, key)
-      array[...] = missing_value
+      log.warning("Defaulting to %s for missing key %s", default_value, key)
+      array[...] = default_value
       data = array
     else:
       assert array.shape == data.shape
@@ -98,12 +91,15 @@ def base_visibility_virtual_store(
 
   return ts.virtual_chunked(
     read_function=read_chunk,
-    rank=len(shape),
+    rank=array_metadata.rank,
     domain=ts.IndexDomain(
-      [ts.Dim(size=s, label=ll) for s, ll in zip(shape, dim_labels)]
+      [
+        ts.Dim(size=s, label=ll)
+        for s, ll in zip(array_metadata.shape, array_metadata.dim_labels)
+      ]
     ),
-    dtype=dtype,
-    chunk_layout=ts.ChunkLayout(chunk_shape=[c[0] for c in chunks]),
+    dtype=array_metadata.dtype,
+    chunk_layout=ts.ChunkLayout(chunk_shape=array_metadata.chunks),
     context=context,
   )
 
@@ -111,17 +107,11 @@ def base_visibility_virtual_store(
 def final_visibility_virtual_store(
   base_vis_store: Multiton[ts.TensorStore],
   calibration_solution_store: Multiton[ts.TensorStore] | None,
-  data_schema: Dict[str, Any],
-  dim_labels: Tuple[str, ...],
+  array_metadata: ArchiveArrayMetadata,
   context: ts.Context | None,
 ):
   """Creates a virtual_chunked TensorStore that derives its
   values from a base visibility store and, possibly a calibration solution store."""
-  dtype = data_schema["dtype"]
-  chunks = data_schema["chunks"]
-  shape = tuple(sum(dc) for dc in chunks)
-  if not all(all(dc[0] == c for c in dc[1:-1]) for dc in chunks):
-    raise ValueError(f"{chunks} are not homogenous")
 
   def read_chunk(
     domain: ts.IndexDomain, array: np.ndarray, params: ts.VirtualChunkedReadParameters
@@ -140,11 +130,14 @@ def final_visibility_virtual_store(
 
   return ts.virtual_chunked(
     read_function=read_chunk,
-    rank=len(shape),
+    rank=array_metadata.rank,
     domain=ts.IndexDomain(
-      [ts.Dim(size=s, label=ll) for s, ll in zip(shape, dim_labels)]
+      [
+        ts.Dim(size=s, label=ll)
+        for s, ll in zip(array_metadata.shape, array_metadata.dim_labels)
+      ]
     ),
-    dtype=dtype,
-    chunk_layout=ts.ChunkLayout(chunk_shape=[c[0] for c in chunks]),
+    dtype=array_metadata.dtype,
+    chunk_layout=ts.ChunkLayout(chunk_shape=array_metadata.chunks),
     context=context,
   )
