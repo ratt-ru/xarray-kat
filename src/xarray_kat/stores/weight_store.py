@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, Tuple
+from typing import TYPE_CHECKING
 
 import numpy as np
 import tensorstore as ts
@@ -15,6 +15,7 @@ from xarray_kat.third_party.vendored.katdal.vis_flags_weights_minimal import (
 if TYPE_CHECKING:
   from xarray_kat.katdal_types import AutoCorrelationIndices
   from xarray_kat.multiton import Multiton
+  from xarray_kat.types import ArchiveArrayMetadata
 
 
 def scaled_weight_store(
@@ -23,9 +24,8 @@ def scaled_weight_store(
   vis_store: Multiton[ts.TensorStore],
   cal_solutions_store: Multiton[ts.TensorStore] | None,
   autocorrs: Multiton[AutoCorrelationIndices],
-  chunk_info: Dict[str, Any],
+  array_metadata: ArchiveArrayMetadata,
   apply_scaling: bool,
-  dim_labels: Tuple[str, ...],
   context: ts.Context | None,
 ):
   """Combines weights and channel_weights and scales the weights
@@ -50,10 +50,6 @@ def scaled_weight_store(
     A TensorStore representing the weights scaled by the visibilities.
 
   """
-  vis_chunks = chunk_info["correlator_data"]["chunks"]
-  vis_shape = tuple(sum(dc) for dc in vis_chunks)
-  if not all(all(dc[0] == c for c in dc[1:-1]) for dc in vis_chunks):
-    raise ValueError(f"Visibility {vis_chunks} are not homogenous")
 
   def read_chunk(
     domain: ts.IndexDomain, array: np.ndarray, params: ts.VirtualChunkedReadParameters
@@ -90,11 +86,14 @@ def scaled_weight_store(
 
   return ts.virtual_chunked(
     read_function=read_chunk,
-    rank=len(vis_shape),
+    rank=array_metadata.rank,
     domain=ts.IndexDomain(
-      [ts.Dim(size=s, label=ll) for s, ll in zip(vis_shape, dim_labels)]
+      [
+        ts.Dim(size=s, label=ll)
+        for s, ll in zip(array_metadata.shape, array_metadata.dim_labels)
+      ]
     ),
-    dtype=np.dtype(chunk_info["weights_channel"]["dtype"]),
-    chunk_layout=ts.ChunkLayout(chunk_shape=[c[0] for c in vis_chunks]),
+    dtype=array_metadata.dtype,
+    chunk_layout=ts.ChunkLayout(chunk_shape=array_metadata.chunks),
     context=context,
   )

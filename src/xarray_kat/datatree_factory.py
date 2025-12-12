@@ -3,6 +3,7 @@ from __future__ import annotations
 import calendar
 import re
 import time
+import warnings
 from datetime import datetime, timezone
 from importlib.metadata import version as importlib_version
 from typing import TYPE_CHECKING, Dict, Iterable, Set
@@ -13,7 +14,7 @@ import tensorstore as ts
 import xarray
 from xarray.core.indexing import LazilyIndexedArray
 
-from xarray_kat.array import CorrProductArray
+from xarray_kat.array import AbstractMeerkatArchiveArray, CorrProductArray
 from xarray_kat.katdal_types import corrprod_to_autocorr
 from xarray_kat.multiton import Multiton
 from xarray_kat.stores.vis_weight_flag_store_factory import VisWeightFlagFactory
@@ -79,6 +80,7 @@ def _index_store(store: Multiton[ts.TensorStore], index) -> ts.TensorStore:
 
 
 class DataTreeFactory:
+  _preferred_chunks: Dict[str, int]
   _data_products: Multiton[TelstateDataProducts]
   _scan_states: Set[str]
   _applycal: str | Iterable[str]
@@ -88,6 +90,7 @@ class DataTreeFactory:
 
   def __init__(
     self,
+    preferred_chunks: Dict[str, int],
     data_products: Multiton[TelstateDataProducts],
     applycal: str | Iterable[str],
     scan_states: Iterable[str],
@@ -95,6 +98,7 @@ class DataTreeFactory:
     endpoint: str,
     token: str | None = None,
   ):
+    self._preferred_chunks = preferred_chunks
     self._data_products = data_products
     self._applycal = applycal
     self._scan_states = set(scan_states)
@@ -102,10 +106,33 @@ class DataTreeFactory:
     self._endpoint = endpoint
     self._token = token
 
+  def merge_chunks(
+    self, name: str, array: AbstractMeerkatArchiveArray
+  ) -> Dict[str, int]:
+    """Merge underlying store chunks with preferred chunks"""
+    preferred_chunks = tuple(
+      self._preferred_chunks.get(al, ac) for ac, al in zip(array.chunks, array.dims)
+    )
+    chunks = {}
+
+    for d, (store_chunk, dim, preferred_chunk) in enumerate(
+      zip(array.chunks, array.dims, preferred_chunks)
+    ):
+      if (dim_chunk := max(store_chunk, preferred_chunk)) % store_chunk != 0:
+        warnings.warn(
+          f"Array {name}'s preferred chunks {preferred_chunks} "
+          f"are not divisible by the underlying store chunks "
+          f"{array.chunks} in dimension {d} ({dim}). "
+          f"This is benign but may result in repeated requests for data.",
+          UserWarning,
+        )
+
+      chunks[dim] = dim_chunk
+
+    return chunks
+
   def create(self) -> Dict[str, xarray.Dataset]:
     telstate = self._data_products.instance.telstate
-    capture_block_id = telstate["capture_block_id"]
-    stream_name = telstate["stream_name"]
     chunk_info = telstate["chunk_info"]
 
     # Time metadata
@@ -216,7 +243,7 @@ class DataTreeFactory:
           a.dims,
           LazilyIndexedArray(a),
           None,
-          {"preferred_chunks": dict(zip(a.dims, a.chunks))},
+          {"preferred_chunks": self.merge_chunks(n, a)},
         )
         for n, a in name_array_map
       }

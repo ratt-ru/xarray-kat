@@ -12,11 +12,13 @@ if TYPE_CHECKING:
   import numpy as np
 
   from xarray_kat.multiton import Multiton
+  from xarray_kat.types import ArchiveArrayMetadata
 
 
 def final_flag_store(
   base_flag_store: Multiton[ts.TensorStore],
   cal_solutions_store: Multiton[ts.TensorStore] | None,
+  array_metadata: ArchiveArrayMetadata,
   context: ts.Context,
 ):
   """Creates a TensorStore representing flagged values.
@@ -39,9 +41,14 @@ def final_flag_store(
 
   return ts.virtual_chunked(
     read_function=read_chunk,
-    rank=base_flag_store.instance.rank,
-    domain=base_flag_store.instance.domain,
-    dtype=base_flag_store.instance.dtype,
-    chunk_layout=base_flag_store.instance.chunk_layout,
+    rank=array_metadata.rank,
+    domain=ts.IndexDomain(
+      [
+        ts.Dim(size=s, label=ll)
+        for s, ll in zip(array_metadata.shape, array_metadata.dim_labels)
+      ]
+    ),
+    dtype=array_metadata.dtype,
+    chunk_layout=ts.ChunkLayout(chunk_shape=array_metadata.chunks),
     context=context,
   )

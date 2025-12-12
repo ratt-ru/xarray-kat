@@ -25,6 +25,7 @@ class KatStore(AbstractDataStore):
 class KatEntryPoint(BackendEntrypoint):
   open_dataset_parameters = [
     "filename_or_obj",
+    "preferred_chunks",
     "applycal",
     "scan_states",
     "capture_block_id",
@@ -58,6 +59,7 @@ class KatEntryPoint(BackendEntrypoint):
     filename_or_obj,
     *,
     drop_variables=None,
+    preferred_chunks: Dict[str, int] | None = None,
     applycal: str | Iterable[str] = "",
     scan_states: Iterable[str] = ("scan", "track"),
     capture_block_id: str | None = None,
@@ -67,6 +69,7 @@ class KatEntryPoint(BackendEntrypoint):
     group_dicts = self.open_groups_as_dict(
       filename_or_obj,
       drop_variables=drop_variables,
+      preferred_chunks=preferred_chunks,
       applycal=applycal,
       scan_states=scan_states,
       capture_block_id=capture_block_id,
@@ -80,6 +83,7 @@ class KatEntryPoint(BackendEntrypoint):
     filename_or_obj: str | os.PathLike[Any] | BufferedIOBase | AbstractDataStore,
     *,
     drop_variables: str | Iterable[str] | None = None,
+    preferred_chunks: Dict[str, int] | None = None,
     applycal: str | Iterable[str] = "",
     scan_states: Iterable[str] = ("scan", "track"),
     capture_block_id: str | None = None,
@@ -103,8 +107,16 @@ class KatEntryPoint(BackendEntrypoint):
     telstate_data_products = Multiton(
       TelstateDataProducts, datasource, applycal=applycal
     )
+
     endpoint = SplitResult(urlbits.scheme, urlbits.netloc, "", "", "").geturl()
+
     group_factory = DataTreeFactory(
-      telstate_data_products, applycal, scan_states, van_vleck, endpoint, token
+      {} if preferred_chunks is None else preferred_chunks,
+      telstate_data_products,
+      applycal,
+      scan_states,
+      van_vleck,
+      endpoint,
+      token,
     )
     return group_factory.create()

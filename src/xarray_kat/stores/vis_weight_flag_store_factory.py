@@ -15,10 +15,12 @@ from xarray_kat.stores.visibility_stores import (
   final_visibility_virtual_store,
 )
 from xarray_kat.stores.weight_store import scaled_weight_store
+from xarray_kat.types import ArchiveArrayMetadata, VanVleckLiteralType
 
 if TYPE_CHECKING:
+  from katsdptelstate.telescope_state import TelescopeState
+
   from xarray_kat.katdal_types import AutoCorrelationIndices, TelstateDataProducts
-  from xarray_kat.types import VanVleckLiteralType
 
 CACHE_SIZE = 100 * 1024 * 1024
 
@@ -99,16 +101,56 @@ class VisWeightFlagFactory:
       self.get_context({"cache_pool": {"total_bytes_limit": CACHE_SIZE}}),
     )
 
-  def create(self):
+  def array_metadata(self, telstate: TelescopeState) -> Dict[str, ArchiveArrayMetadata]:
+    """Derive metadata for the main MeerKAT data arrays
+
+    Also performs consistency checks"""
+    chunk_info = telstate["chunk_info"]
+    array_meta = {
+      dt: ArchiveArrayMetadata(
+        dt, MISSING_VALUES[dt], DATA_TYPE_LABELS[dt], schema["chunks"], schema["dtype"]
+      )
+      for dt, schema in chunk_info.items()
+    }
+    label_keys = list(sorted(DATA_TYPE_LABELS.keys()))
+
+    if list(sorted(array_meta.keys())) != label_keys:
+      raise ValueError(
+        f"Mismatch between telstate arrays {array_meta.keys()} "
+        f"and expected arrays {label_keys}."
+      )
+
+    if (
+      len(
+        cp_shapes := {v.shape for k, v in array_meta.items() if k != "weights_channel"}
+      )
+      != 1
+    ):
+      raise ValueError(
+        f"Array shapes ({cp_shapes}) involving correlation products  "
+        f"are not consistent: {array_meta}."
+      )
+
+    cp_shape = next(iter(cp_shapes))
+
+    if cp_shape[:-1] != (cw_shape := array_meta["weights_channel"].shape):
+      raise ValueError(
+        f"weights_channel shape {cw_shape} "
+        f"does not match corrprod array "
+        f"shapes {cp_shape}."
+      )
+
+    return array_meta
+
+  def create(self) -> None:
     telstate = self._data_products.instance.telstate
+    array_meta = self.array_metadata(telstate)
 
     # Create the base visibility store
     base_vis = Multiton(
       base_visibility_virtual_store,
       self.http_store("correlator_data"),
-      telstate["chunk_info"]["correlator_data"],
-      DATA_TYPE_LABELS["correlator_data"],
-      MISSING_VALUES["correlator_data"],
+      array_meta["correlator_data"],
       self._autocorrs,
       self._van_vleck,
       self.get_context({"cache_pool": {"total_bytes_limit": CACHE_SIZE}}),
@@ -135,6 +177,22 @@ class VisWeightFlagFactory:
       {"data_copy_concurrency": {"limit": mp.cpu_count()}}
     )
 
+    # Create a top level metadata object to ensure that
+    # all top level stores have the same chunking as
+    # the visibilities. This ensures consistent
+    # chunking along dimensions for the xarray layer.
+    # The weight and flag stores use different dtypes
+    final_metadata = array_meta["correlator_data"]
+
+    # Create the top level visibility store
+    self._vis = Multiton(
+      final_visibility_virtual_store,
+      base_vis,
+      calibration_solutions,
+      final_metadata,
+      top_level_thread_ctx,
+    )
+
     # Create the top level weight store
     self._weight = Multiton(
       scaled_weight_store,
@@ -143,19 +201,8 @@ class VisWeightFlagFactory:
       base_vis,
       calibration_solutions,
       self._autocorrs,
-      telstate["chunk_info"],
+      final_metadata.copy(dtype=array_meta["weights_channel"].dtype),
       telstate.get("needs_weight_power_scale", False),
-      DATA_TYPE_LABELS["correlator_data"],
-      top_level_thread_ctx,
-    )
-
-    # Create the top level visibility store
-    self._vis = Multiton(
-      final_visibility_virtual_store,
-      base_vis,
-      calibration_solutions,
-      telstate["chunk_info"]["correlator_data"],
-      DATA_TYPE_LABELS["correlator_data"],
       top_level_thread_ctx,
     )
 
@@ -164,22 +211,26 @@ class VisWeightFlagFactory:
       final_flag_store,
       self.http_backed_store("flags"),
       calibration_solutions,
+      final_metadata.copy(dtype=array_meta["flags"].dtype),
       top_level_thread_ctx,
     )
 
   def vis(self) -> Multiton[ts.TensorStore]:
+    """Return the visibility TensorStore"""
     if self._vis is None:
       self.create()
 
     return cast(Multiton[ts.TensorStore], self._vis)
 
   def weight(self) -> Multiton[ts.TensorStore]:
+    """Return the weight TensorStore"""
     if self._weight is None:
       self.create()
 
     return cast(Multiton[ts.TensorStore], self._weight)
 
   def flag(self) -> Multiton[ts.TensorStore]:
+    """Return the flag TensorStore"""
     if self._flag is None:
       self.create()
 
