@@ -23,7 +23,14 @@ class KatStore(AbstractDataStore):
 
 
 class KatEntryPoint(BackendEntrypoint):
-  open_dataset_parameters = ["filename_or_obj, capture_block_id", "stream_name"]
+  open_dataset_parameters = [
+    "filename_or_obj",
+    "applycal",
+    "scan_states",
+    "capture_block_id",
+    "stream_name",
+    "van_vleck",
+  ]
   description = "Opens a MeerKAT data source"
   supports_groups = True
   url = "https://github.com/ratt-ru/xarray-kat"
