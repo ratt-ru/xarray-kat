@@ -44,7 +44,7 @@ class MeerkatArray:
     return (self.data,)
 
   def __repr__(self) -> str:
-    return f"{self.__class__.__name__}<chunksize={self.chunks}, dtype={self.dtype}"
+    return f"{self.__class__.__name__}<chunksize={self.chunks}, dtype={self.dtype}>"
 
 
 class MeerKatChunkManager(ChunkManagerEntrypoint):
