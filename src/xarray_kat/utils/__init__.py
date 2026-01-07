@@ -1,4 +1,4 @@
-from typing import Iterable, Tuple
+from typing import Iterable
 
 from xarray.core.types import T_NormalizedChunks
 
