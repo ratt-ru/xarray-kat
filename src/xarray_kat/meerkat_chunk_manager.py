@@ -144,7 +144,7 @@ class MeerKatChunkManager(ChunkManagerEntrypoint):
           for index, array in zip(indices, arrays):
             results[index][key] = array[key]
 
-    return tuple(results)
+    return results
 
   def apply_gufunc(
     self,
