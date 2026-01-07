@@ -17,6 +17,7 @@ from xarray_kat.meerkat_chunk_manager import MeerkatArray, MeerKatChunkManager
 
 
 class DummyArray(BackendArray):
+  """Wraps a numpy array for testing"""
   def __init__(self, data):
     self.data = data
 
@@ -65,22 +66,25 @@ NFREQ = 16
 NPOL = 4
 TBL = (NTIME, NBL)
 ALL = TBL + (NFREQ, NPOL)
-TBLC = (2, 3)
-ALLC = TBLC + (4, 4)
-TBLDIMS = ("time", "baseline_id")
-ALLDIMS = TBLDIMS + ("frequency", "polarization")
+TBL_CHUNKS = (2, 3)
+UVW_CHUNKS = TBL_CHUNKS + (3,)
+ALL_CHUNKS = TBL_CHUNKS + (4, 4)
+TBL_DIMS = ("time", "baseline_id")
+UVW_DIMS = TBL_DIMS + ("uvw_label",)
+ALL_DIMS = TBL_DIMS + ("frequency", "polarization")
 
 
 @pytest.fixture
 def small_meerkat_ds(request):
-  A = lambda a: LazilyIndexedArray(DummyArray(a))
+  def Array(a):
+    return LazilyIndexedArray(DummyArray(a))
 
   return xarray.Dataset(
     {
-      "UVW": (TBLDIMS + ("uvw_label",), A(np.zeros(TBL + (3,)))),
-      "FLAG": (ALLDIMS, A(np.ones(ALL, np.uint8))),
-      "WEIGHT": (ALLDIMS, A(np.ones(ALL, np.float64))),
-      "DATA": (ALLDIMS, A(np.ones(ALL, np.complex64))),
+      "UVW": (UVW_DIMS, Array(np.zeros(TBL + (3,)))),
+      "FLAG": (ALL_DIMS, Array(np.ones(ALL, np.uint8))),
+      "WEIGHT": (ALL_DIMS, Array(np.ones(ALL, np.float64))),
+      "DATA": (ALL_DIMS, Array(np.ones(ALL, np.complex64))),
     }
   )
 
@@ -88,8 +92,8 @@ def small_meerkat_ds(request):
 def test_load_backend_arrays(register_meerkat_chunkmanager, small_meerkat_ds):
   ds = small_meerkat_ds
   assert (mgr := guess_chunkmanager("meerkat")) is not None
-  shape = (ds.sizes[d] for d in ("time", "baseline_id", "frequency", "polarization"))
-  chunks = mgr.normalize_chunks(ALLC, shape)
+  shape = tuple(ds.sizes[d] for d in ALL_DIMS)
+  chunks = mgr.normalize_chunks(ALL_CHUNKS, shape)
   uvw_chunks = chunks[:2] + ((3,),)
 
   assert isinstance(ds.UVW.variable._data, LazilyIndexedArray)
@@ -97,20 +101,14 @@ def test_load_backend_arrays(register_meerkat_chunkmanager, small_meerkat_ds):
   assert isinstance(ds.WEIGHT.variable._data, LazilyIndexedArray)
   assert isinstance(ds.DATA.variable._data, LazilyIndexedArray)
 
-  ds = small_meerkat_ds.chunk(
-    {
-      "time": ALLC[0],
-      "baseline_id": ALLC[1],
-      "frequency": ALLC[2],
-      "polarization": ALLC[3],
-    },
-    chunked_array_type="meerkat",
-  )
+  ds = small_meerkat_ds.chunk(dict(zip(ALL_DIMS, ALL_CHUNKS)), chunked_array_type="meerkat")
 
   assert isinstance(uvw := ds.UVW.data, MeerkatArray) and uvw.chunks == uvw_chunks
   assert isinstance(flag := ds.FLAG.data, MeerkatArray) and flag.chunks == chunks
   assert isinstance(weight := ds.WEIGHT.data, MeerkatArray) and weight.chunks == chunks
   assert isinstance(data := ds.DATA.data, MeerkatArray) and data.chunks == chunks
+
+  assert dict(ds.chunks) == dict(zip(ALL_DIMS + ("uvw_label",), chunks + ((3,),)))
 
   ds.load()
 
