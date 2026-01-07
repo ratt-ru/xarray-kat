@@ -1,6 +1,12 @@
 import numpy as np
 import pytest
 import xarray
+from xarray.backends import BackendArray
+from xarray.core.indexing import (
+  IndexingSupport,
+  LazilyIndexedArray,
+  explicit_indexing_adapter,
+)
 from xarray.namedarray.parallelcompat import (
   get_chunked_array_type,
   guess_chunkmanager,
@@ -10,18 +16,30 @@ from xarray.namedarray.parallelcompat import (
 from xarray_kat.meerkat_chunk_manager import MeerkatArray, MeerKatChunkManager
 
 
+class DummyArray(BackendArray):
+  def __init__(self, data):
+    self.data = data
+
+  @property
+  def shape(self):
+    return self.data.shape
+
+  @property
+  def dtype(self):
+    return self.data.dtype
+
+  def __getitem__(self, key):
+    return explicit_indexing_adapter(
+      key, self.shape, IndexingSupport.OUTER, self._getitem
+    )
+
+  def _getitem(self, key):
+    return self.data[key]
+
+
 @pytest.fixture
 def register_meerkat_chunkmanager(monkeypatch):
-  """
-  Mocks the registering of an additional ChunkManagerEntrypoint.
-
-  This preserves the presence of the existing DaskManager, so a test that relies on this and DaskManager both being
-  returned from list_chunkmanagers() at once would still work.
-
-  The monkeypatching changes the behavior of list_chunkmanagers when called inside xarray.namedarray.parallelcompat,
-  but not when called from this tests file.
-  """
-  # Should include DaskManager iff dask is available to be imported
+  """Mock registration of a ChunkManagerEntrypoint"""
   preregistered_chunkmanagers = list_chunkmanagers()
 
   monkeypatch.setattr(
@@ -41,34 +59,58 @@ def test_chunkmanager_chunked_array(register_meerkat_chunkmanager):
   assert isinstance(manager, MeerKatChunkManager)
 
 
-def test_load_chunked_array(register_meerkat_chunkmanager):
-  ntime = 10
-  nbl = 7 * (7 - 1) // 2
-  nfreq = 16
-  npol = 4
-  tbl = (ntime, nbl)
-  all = tbl + (nfreq, npol)
-  tblc = (2, 3)
-  allc = tblc + (4, 4)
-  tbldims = ("time", "baseline_id")
-  alldims = tbldims + ("frequency", "polarization")
+NTIME = 10
+NBL = 7 * (7 - 1) // 2
+NFREQ = 16
+NPOL = 4
+TBL = (NTIME, NBL)
+ALL = TBL + (NFREQ, NPOL)
+TBLC = (2, 3)
+ALLC = TBLC + (4, 4)
+TBLDIMS = ("time", "baseline_id")
+ALLDIMS = TBLDIMS + ("frequency", "polarization")
 
-  ds = xarray.Dataset(
+
+@pytest.fixture
+def small_meerkat_ds(request):
+  A = lambda a: LazilyIndexedArray(DummyArray(a))
+
+  return xarray.Dataset(
     {
-      "UVW": (
-        tbldims + ("uvw_label",),
-        MeerkatArray(np.zeros(tbl + (3,)), tblc + (3,)),
-      ),
-      "FLAG": (alldims, MeerkatArray(np.ones(all, np.uint8), allc)),
-      "WEIGHT": (alldims, MeerkatArray(np.ones(all, np.float64), allc)),
-      "DATA": (alldims, MeerkatArray(np.ones(all, np.complex64), allc)),
+      "UVW": (TBLDIMS + ("uvw_label",), A(np.zeros(TBL + (3,)))),
+      "FLAG": (ALLDIMS, A(np.ones(ALL, np.uint8))),
+      "WEIGHT": (ALLDIMS, A(np.ones(ALL, np.float64))),
+      "DATA": (ALLDIMS, A(np.ones(ALL, np.complex64))),
     }
   )
 
-  assert isinstance(ds.UVW.data, MeerkatArray)
-  assert isinstance(ds.FLAG.data, MeerkatArray)
-  assert isinstance(ds.WEIGHT.data, MeerkatArray)
-  assert isinstance(ds.DATA.data, MeerkatArray)
+
+def test_load_backend_arrays(register_meerkat_chunkmanager, small_meerkat_ds):
+  ds = small_meerkat_ds
+  assert (mgr := guess_chunkmanager("meerkat")) is not None
+  shape = (ds.sizes[d] for d in ("time", "baseline_id", "frequency", "polarization"))
+  chunks = mgr.normalize_chunks(ALLC, shape)
+  uvw_chunks = chunks[:2] + ((3,),)
+
+  assert isinstance(ds.UVW.variable._data, LazilyIndexedArray)
+  assert isinstance(ds.FLAG.variable._data, LazilyIndexedArray)
+  assert isinstance(ds.WEIGHT.variable._data, LazilyIndexedArray)
+  assert isinstance(ds.DATA.variable._data, LazilyIndexedArray)
+
+  ds = small_meerkat_ds.chunk(
+    {
+      "time": ALLC[0],
+      "baseline_id": ALLC[1],
+      "frequency": ALLC[2],
+      "polarization": ALLC[3],
+    },
+    chunked_array_type="meerkat",
+  )
+
+  assert isinstance(uvw := ds.UVW.data, MeerkatArray) and uvw.chunks == uvw_chunks
+  assert isinstance(flag := ds.FLAG.data, MeerkatArray) and flag.chunks == chunks
+  assert isinstance(weight := ds.WEIGHT.data, MeerkatArray) and weight.chunks == chunks
+  assert isinstance(data := ds.DATA.data, MeerkatArray) and data.chunks == chunks
 
   ds.load()
 
