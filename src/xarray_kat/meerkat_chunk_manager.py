@@ -1,3 +1,4 @@
+import warnings
 from typing import Any
 
 import numpy as np
@@ -6,19 +7,18 @@ from xarray.core.types import T_Chunks, T_DuckArray, T_NormalizedChunks
 from xarray.namedarray._typing import _Chunks
 from xarray.namedarray.parallelcompat import ChunkManagerEntrypoint
 
+from xarray_kat.utils import normalize_chunks
 
-class MeerKatChunkedArray:
+
+class MeerkatArray:
   __slots__ = ("chunks", "data")
 
   data: npt.ArrayLike
   chunks: T_NormalizedChunks
 
   def __init__(self, data: npt.ArrayLike, chunks: T_NormalizedChunks):
-    if data.shape != (cs := tuple(sum(c) for c in chunks)):
-      raise ValueError(f"data shape {data.shape} does match chunk shape {cs}")
-
     self.data = data
-    self.chunks = chunks
+    self.chunks = normalize_chunks(chunks, data.shape)
 
   @property
   def dtype(self) -> npt.DTypeLike:
@@ -33,7 +33,7 @@ class MeerKatChunkedArray:
     return self.data.shape
 
   def rechunk(self, chunks, **kwargs):
-    return MeerKatChunkedArray(self.data, chunks)
+    return MeerkatArray(self.data, chunks)
 
   def __array_namespace__(self, *, api_version: str | None = None):
     raise NotImplementedError
@@ -43,15 +43,18 @@ class MeerKatChunkedArray:
   ) -> tuple[np.ndarray[Any, npt.DTypeLike], ...]:
     return (self.data,)
 
+  def __repr__(self) -> str:
+    return f"{self.__class__.__name__}<chunksize={self.chunks}, dtype={self.dtype}"
+
 
 class MeerKatChunkManager(ChunkManagerEntrypoint):
   def __init__(self):
-    self.array_cls = MeerKatChunkedArray
+    self.array_cls = MeerkatArray
 
   def is_chunked_array(self, data) -> bool:
-    return isinstance(data, MeerKatChunkedArray)
+    return isinstance(data, MeerkatArray)
 
-  def chunks(self, data: MeerKatChunkedArray) -> T_NormalizedChunks:
+  def chunks(self, data: MeerkatArray) -> T_NormalizedChunks:
     return data.chunks
 
   def normalize_chunks(
@@ -62,17 +65,28 @@ class MeerKatChunkManager(ChunkManagerEntrypoint):
     dtype: np.dtype | None = None,
     previous_chunks: T_NormalizedChunks | None = None,
   ) -> T_NormalizedChunks:
-    raise NotImplementedError
+    if shape is None:
+      raise ValueError("shape was None")
+
+    if limit is not None:
+      warnings.warn(f"limit {limit} ignored in normalize_chunks", UserWarning)
+
+    if previous_chunks is not None:
+      warnings.warn(
+        f"previous_chunks {previous_chunks} ignored in normalize_chunks", UserWarning
+      )
+
+    return normalize_chunks(chunks, shape)
 
   def from_array(
     self, data: T_DuckArray | npt.ArrayLike, chunks: _Chunks, **kw
-  ) -> MeerKatChunkedArray:
-    raise MeerKatChunkedArray(data, chunks)
+  ) -> MeerkatArray:
+    return MeerkatArray(data, chunks)
 
-  def rechunk(self, data: MeerKatChunkedArray, chunks, **kwargs) -> MeerKatChunkedArray:
+  def rechunk(self, data: MeerkatArray, chunks, **kwargs) -> MeerkatArray:
     return data.rechunk(chunks, **kwargs)
 
-  def compute(self, *data: MeerKatChunkedArray, **kwargs) -> tuple[np.ndarray, ...]:  # type: ignore[override]
+  def compute(self, *data: MeerkatArray, **kwargs) -> tuple[np.ndarray, ...]:
     return sum([d.compute(**kwargs) for d in data], ())
 
   def apply_gufunc(
