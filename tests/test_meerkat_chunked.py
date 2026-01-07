@@ -56,7 +56,7 @@ def test_get_chunkmanager(register_meerkat_chunkmanager):
 
 
 def test_chunkmanager_chunked_array(register_meerkat_chunkmanager):
-  array = MeerkatArray(np.zeros((25, 45), np.float64), ((10, 10, 5), (20, 20, 5)))
+  array = MeerkatArray(np.zeros((25, 45), np.float64), (10, 20))
   manager = get_chunked_array_type(array)
   assert isinstance(manager, MeerKatChunkManager)
 
@@ -80,12 +80,14 @@ def small_meerkat_ds(request):
   def Array(a):
     return LazilyIndexedArray(DummyArray(a))
 
+  ramp = np.arange(np.prod(ALL)).astype(np.float32).reshape(ALL)
+
   return xarray.Dataset(
     {
       "UVW": (UVW_DIMS, Array(np.zeros(TBL + (3,)))),
       "FLAG": (ALL_DIMS, Array(np.ones(ALL, np.uint8))),
-      "WEIGHT": (ALL_DIMS, Array(np.ones(ALL, np.float64))),
-      "DATA": (ALL_DIMS, Array(np.ones(ALL, np.complex64))),
+      "WEIGHT": (ALL_DIMS, Array(ramp)),
+      "DATA": (ALL_DIMS, Array(ramp + ramp * 1j)),
     }
   )
 
@@ -119,3 +121,8 @@ def test_load_backend_arrays(register_meerkat_chunkmanager, small_meerkat_ds):
   assert isinstance(ds.FLAG.data, np.ndarray)
   assert isinstance(ds.WEIGHT.data, np.ndarray)
   assert isinstance(ds.DATA.data, np.ndarray)
+
+  # Expected data has been populated during the load
+  ramp = np.arange(np.prod(ds.WEIGHT.shape)).reshape(ds.WEIGHT.shape)
+  np.testing.assert_array_equal(ramp, ds.WEIGHT.data)
+  np.testing.assert_array_equal(ramp + ramp * 1j, ds.DATA.data)
