@@ -18,6 +18,7 @@ from xarray_kat.meerkat_chunk_manager import MeerkatArray, MeerKatChunkManager
 
 class DummyArray(BackendArray):
   """Wraps a numpy array for testing"""
+
   def __init__(self, data):
     self.data = data
 
@@ -101,7 +102,9 @@ def test_load_backend_arrays(register_meerkat_chunkmanager, small_meerkat_ds):
   assert isinstance(ds.WEIGHT.variable._data, LazilyIndexedArray)
   assert isinstance(ds.DATA.variable._data, LazilyIndexedArray)
 
-  ds = small_meerkat_ds.chunk(dict(zip(ALL_DIMS, ALL_CHUNKS)), chunked_array_type="meerkat")
+  ds = small_meerkat_ds.chunk(
+    dict(zip(ALL_DIMS, ALL_CHUNKS)), chunked_array_type="meerkat"
+  )
 
   assert isinstance(uvw := ds.UVW.data, MeerkatArray) and uvw.chunks == uvw_chunks
   assert isinstance(flag := ds.FLAG.data, MeerkatArray) and flag.chunks == chunks
