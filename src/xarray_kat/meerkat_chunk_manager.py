@@ -60,14 +60,11 @@ class MeerKatChunkManager(ChunkManagerEntrypoint):
   def normalize_chunks(
     self,
     chunks: T_Chunks | T_NormalizedChunks,
-    shape: tuple[int, ...] | None = None,
+    shape: tuple[int, ...],
     limit: int | None = None,
     dtype: np.dtype | None = None,
     previous_chunks: T_NormalizedChunks | None = None,
   ) -> T_NormalizedChunks:
-    if shape is None:
-      raise ValueError("shape was None")
-
     if limit is not None:
       warnings.warn(f"limit {limit} ignored in normalize_chunks", UserWarning)
 
