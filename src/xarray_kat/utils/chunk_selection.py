@@ -14,6 +14,7 @@ from xarray.core.types import T_NormalizedChunks
 T_ChunkRange: TypeAlias = int | np.integer | Tuple[slice | npt.NDArray, ...]
 T_ChunkRanges = Tuple[T_ChunkRange, ...]
 
+
 def _slice_ranges(
   offsets: npt.NDArray[np.integer],
   indexer: slice,
@@ -27,7 +28,7 @@ def _slice_ranges(
   right = np.searchsorted(offsets, indexer.stop, side="right")
 
   # Extract the internal boundary points
-  boundary_points = offsets[left : right]
+  boundary_points = offsets[left:right]
   concat = [boundary_points]
 
   # Add the endpoints if they aren't already present
@@ -42,13 +43,11 @@ def _slice_ranges(
 
 
 def _1d_chunk_ranges(
-  chunks: Tuple[int, ...],
-  size: int,
-  indexer: OuterIndexerType
+  chunks: Tuple[int, ...], size: int, indexer: OuterIndexerType
 ) -> T_ChunkRange:
   """For a give indexer, produces indexers for each chunk that it overlaps"""
   if len(chunks) == 0:
-    raise ValueError(f"Indexing empty array")
+    raise ValueError("Indexing empty array")
 
   offsets = np.concatenate(([0], np.cumsum(chunks)))
 
@@ -63,8 +62,7 @@ def _1d_chunk_ranges(
   elif isinstance(indexer, np.ndarray):
     if np.any(oob := indexer >= size):
       raise IndexError(
-        f"Indices {indexer[np.where(oob)[0]]} "
-        f"are out of bounds for size {size}"
+        f"Indices {indexer[np.where(oob)[0]]} are out of bounds for size {size}"
       )
 
     # Find the chunks to which each index applies
@@ -90,9 +88,8 @@ def _1d_chunk_ranges(
   else:
     raise TypeError(f"Invalid indexing type {type(indexer)}")
 
-def chunk_ranges(
-    chunks: T_NormalizedChunks, indexer: OuterIndexer
-) -> T_ChunkRanges:
+
+def chunk_ranges(chunks: T_NormalizedChunks, indexer: OuterIndexer) -> T_ChunkRanges:
   """Given a chunking scheme and an indexer,
   return indexers for each individual chunk.
 

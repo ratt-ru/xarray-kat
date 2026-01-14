@@ -1,45 +1,106 @@
 import warnings
 from collections import defaultdict
-from functools import reduce
 from itertools import pairwise, product
-from typing import Any
+from typing import Any, Tuple
 
 import numpy as np
 import numpy.typing as npt
+from xarray.core.indexing import (
+  BasicIndexer,
+  ImplicitToExplicitIndexingAdapter,
+  LazilyIndexedArray,
+  OuterIndexer,
+  OuterIndexerType,
+  expanded_indexer,
+  integer_types,
+)
 from xarray.core.types import T_Chunks, T_DuckArray, T_NormalizedChunks
 from xarray.namedarray._typing import _Chunks
 from xarray.namedarray.parallelcompat import ChunkManagerEntrypoint
 
 from xarray_kat.utils import normalize_chunks
+from xarray_kat.utils.chunk_selection import chunk_ranges
 
 
 class MeerkatArray:
-  __slots__ = ("chunks", "data")
+  __slots__ = ("array", "_unselected_chunks", "_selected_chunk_ranges")
 
-  data: npt.ArrayLike
-  chunks: T_NormalizedChunks
+  array: LazilyIndexedArray
+  # Chunks associated with the full shape of the array
+  # i.e. with no selection applied
+  _unselected_chunks: T_NormalizedChunks
+  _selected_chunk_ranges: Tuple[OuterIndexerType, ...] | None
 
-  def __init__(self, data: npt.ArrayLike, chunks: T_NormalizedChunks):
-    self.data = data
-    self.chunks = normalize_chunks(chunks, data.shape)
+  def __init__(self, array: T_DuckArray, chunks: T_NormalizedChunks):
+    if isinstance(array, ImplicitToExplicitIndexingAdapter):
+      array = array.array
+
+    if not isinstance(array, LazilyIndexedArray):
+      array = LazilyIndexedArray(array)
+
+    self.array = array
+    self._unselected_chunks = normalize_chunks(chunks, array.array.shape)
+    self._selected_chunk_ranges = None
+    assert tuple(sum(c) for c in self._unselected_chunks) == array.array.shape
 
   def __getitem__(self, key):
-    return self.data[key]
+    xkey = expanded_indexer(key, self.array.ndim)
+    if any(isinstance(k, OuterIndexerType) for k in xkey):
+      array = self.array.oindex[OuterIndexer(xkey)]
+    else:
+      array = self.array[BasicIndexer(xkey)]
+
+    return MeerkatArray(array, self._unselected_chunks)
+
+  @property
+  def chunk_ranges(self):
+    if self._selected_chunk_ranges is None:
+      self._selected_chunk_ranges = chunk_ranges(
+        self._unselected_chunks, self.array.key.tuple
+      )
+
+    return self._selected_chunk_ranges
+
+  @property
+  def chunks(self) -> T_NormalizedChunks:
+    assert len(cr := self.chunk_ranges) == len(self.array.key.tuple)
+    shape = tuple(sum(c) for c in self._unselected_chunks)
+    result = []
+
+    for d, dim_chunk_ranges in enumerate(cr):
+      # Squeeze out integer selections
+      if isinstance(dim_chunk_ranges, integer_types):
+        continue
+
+      dim_chunks = []
+
+      for c in dim_chunk_ranges:
+        if isinstance(c, slice):
+          dim_chunks.append(len(range(*c.indices(shape[d]))))
+        elif isinstance(c, np.ndarray):
+          assert c.ndim == 2 and c.shape[0] == 2
+          dim_chunks.append(c.shape[1])
+        else:
+          raise TypeError(f"Invalid chunk type {type(c)}")
+
+      result.append(tuple(dim_chunks))
+
+    return tuple(result)
 
   @property
   def dtype(self) -> npt.DTypeLike:
-    return self.data.dtype
+    return self.array.dtype
 
   @property
   def ndim(self) -> int:
-    return self.data.ndim
+    return self.array.ndim
 
   @property
   def shape(self) -> tuple[int, ...]:
-    return self.data.shape
+    return self.array.shape
 
   def rechunk(self, chunks, **kwargs):
-    return MeerkatArray(self.data, chunks)
+    return MeerkatArray(self.array, chunks)
 
   def __array_namespace__(self, *, api_version: str | None = None):
     raise NotImplementedError
@@ -47,10 +108,17 @@ class MeerkatArray:
   def compute(
     self, *data: Any, **kwargs: Any
   ) -> tuple[np.ndarray[Any, npt.DTypeLike], ...]:
-    return (self.data,)
+    return (self.array.get_duck_array(),)
 
   def __repr__(self) -> str:
     return f"{self.__class__.__name__}<chunksize={self.chunks}, dtype={self.dtype}>"
+
+
+def split_key(key):
+  """Split key into source and destination keys"""
+  return tuple(
+    zip(*((k[0], k[1]) if isinstance(k, np.ndarray) else (k, k) for k in key))
+  )
 
 
 class MeerKatChunkManager(ChunkManagerEntrypoint):
@@ -95,8 +163,8 @@ class MeerKatChunkManager(ChunkManagerEntrypoint):
     This method attempts to load array data chunk-wise for arrays
     with the same chunking schema. This is because final
     visibilities, flags and weights (VFW) are calculated dependent on one
-    another's raw inputs and it is therefore a better access pattern requires
-    load their co-located chunks at the same time.
+    another's raw inputs. Therefore, an optimal access pattern loads
+    their chunks one after the other.
 
     Returns:
       tuple of result arrays
@@ -118,31 +186,25 @@ class MeerKatChunkManager(ChunkManagerEntrypoint):
     # they all have shape (time, baseline_id, frequency, polarization)
     # and are dependent on one another
     same_chunks = defaultdict(list)
-    for d, array in enumerate(data):
-      same_chunks[array.chunks].append((d, array))
-
-    def cumsum(prev, value):
-      return prev + [value + prev[-1]]
+    for index, array in enumerate(data):
+      same_chunks[array.chunks].append((index, array))
 
     # Iterate over groups of arrays with the same chunking
     for chunks, index_and_array in same_chunks.items():
       if len(index_and_array) == 1:
-        # Singleton case, probably not necessary to ingest data chunk-wise
+        # If the group contains a single array, we choose not
+        # to load data chunk-wise
         index, array = index_and_array[0]
-        results[index][...] = array[...]
+        (results[index][...],) = array.compute()
       else:
-        # Related array case
-        ranges = [reduce(cumsum, c, [0]) for c in chunks]
+        # Load data chunk-wise over arrays in a group,
+        ranges = [np.concatenate(([0], np.cumsum(c))) for c in chunks]
         indices, arrays = zip(*index_and_array)
 
-        # 1) For each chunk
-        #   a) For each related array
-        #     i) Do a read + write
         for dim_coord_pairs in product(*(pairwise(r) for r in ranges)):
           key = tuple(slice(s, e) for s, e in dim_coord_pairs)
-
           for index, array in zip(indices, arrays):
-            results[index][key] = array[key]
+            (results[index][key],) = array[key].compute()
 
     return results
 

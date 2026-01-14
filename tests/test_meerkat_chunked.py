@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 import xarray
+from numpy.testing import assert_array_equal
 from xarray.backends import BackendArray
 from xarray.core.indexing import (
   IndexingSupport,
@@ -126,3 +127,45 @@ def test_load_backend_arrays(register_meerkat_chunkmanager, small_meerkat_ds):
   ramp = np.arange(np.prod(ds.WEIGHT.shape)).reshape(ds.WEIGHT.shape)
   np.testing.assert_array_equal(ramp, ds.WEIGHT.data)
   np.testing.assert_array_equal(ramp + ramp * 1j, ds.DATA.data)
+
+
+def test_load_backend_arrays_isel(register_meerkat_chunkmanager, small_meerkat_ds):
+  ds = small_meerkat_ds
+  assert (mgr := guess_chunkmanager("meerkat")) is not None
+  shape = tuple(ds.sizes[d] for d in ALL_DIMS)
+  chunks = mgr.normalize_chunks(ALL_CHUNKS, shape)
+  uvw_chunks = chunks[:2] + ((3,),)
+
+  ramp = np.arange(np.prod(ds.WEIGHT.shape)).reshape(ds.WEIGHT.shape)
+
+  assert isinstance(ds.UVW.variable._data, LazilyIndexedArray)
+  assert isinstance(ds.FLAG.variable._data, LazilyIndexedArray)
+  assert isinstance(ds.WEIGHT.variable._data, LazilyIndexedArray)
+  assert isinstance(ds.DATA.variable._data, LazilyIndexedArray)
+
+  ds = small_meerkat_ds.chunk(
+    dict(zip(ALL_DIMS, ALL_CHUNKS)), chunked_array_type="meerkat"
+  )
+
+  assert isinstance(uvw := ds.UVW.data, MeerkatArray) and uvw.chunks == uvw_chunks
+  assert isinstance(flag := ds.FLAG.data, MeerkatArray) and flag.chunks == chunks
+  assert isinstance(weight := ds.WEIGHT.data, MeerkatArray) and weight.chunks == chunks
+  assert isinstance(data := ds.DATA.data, MeerkatArray) and data.chunks == chunks
+
+  assert dict(ds.chunks) == dict(zip(ALL_DIMS + ("uvw_label",), chunks + ((3,),)))
+
+  sel = {"time": slice(2, 20), "baseline_id": [1, 3, 5, 6, 7], "frequency": slice(4, 8)}
+  ds = ds.isel(**sel)
+  ds.load()
+
+  assert isinstance(ds.UVW.data, np.ndarray)
+  assert isinstance(ds.FLAG.data, np.ndarray)
+  assert isinstance(ds.WEIGHT.data, np.ndarray)
+  assert isinstance(ds.DATA.data, np.ndarray)
+
+  key = tuple((sel["time"], sel["baseline_id"], sel["frequency"], slice(None)))
+
+  # Expected data has been populated during the load
+  # that matches the selection
+  assert_array_equal(ramp[key], ds.WEIGHT.data)
+  assert_array_equal((ramp + ramp * 1j)[key], ds.DATA.data)
