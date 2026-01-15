@@ -111,7 +111,7 @@ class MeerkatArray:
     return (self.array.get_duck_array(),)
 
   def __repr__(self) -> str:
-    return f"{self.__class__.__name__}<chunksize={self.chunks}, dtype={self.dtype}>"
+    return f"{self.__class__.__name__}<chunksize={self.chunks}, dtype={self.dtype.name}>"
 
 
 def split_key(key):
