@@ -21,7 +21,7 @@ from xarray.namedarray.parallelcompat import (
 )
 
 from xarray_kat.meerkat_chunk_manager import MeerkatArray, MeerKatChunkManager
-
+from xarray_kat.utils import normalize_chunks
 
 @pytest.fixture(params=[{"shape": (4, 5), "dtype": np.complex64}])
 def ramp_data(request):
@@ -106,7 +106,8 @@ def small_ds(request):
   )
 
 
-def test_load_backend_arrays(register_meerkat_chunkmanager, small_ds):
+def test_chunk_backend_arrays(register_meerkat_chunkmanager, small_ds):
+  """ Tests rechunking into chunked MeerKatArrays"""
   ds = small_ds
   assert (mgr := guess_chunkmanager("meerkat")) is not None
   shape = tuple(ds.sizes[d] for d in ALL_DIMS)
@@ -141,6 +142,7 @@ def test_load_backend_arrays(register_meerkat_chunkmanager, small_ds):
 
 
 def test_load_backend_arrays_isel(register_meerkat_chunkmanager, small_ds):
+  """Tests rechunking into chunked MeerKatArray following by an isel"""
   ds = small_ds
   assert (mgr := guess_chunkmanager("meerkat")) is not None
   shape = tuple(ds.sizes[d] for d in ALL_DIMS)
@@ -220,6 +222,7 @@ class TensorstoreBackendArray(WrappedTensorStore, BackendArray):
 
 
 def test_tensorstore_backend_array(register_meerkat_chunkmanager, ramp_data):
+  """Tests"""
   A = TensorstoreBackendArray(ts.array(ramp_data))
   M = MeerkatArray(A, (2, 3))
   L = LazilyIndexedArray(A)
@@ -275,21 +278,38 @@ def register_dummy_engine(monkeypatch):
   yield
 
 
+
+@pytest.mark.parametrize("chunks", [
+  {},
+  {"time": 1, "frequency": 4},
+  {"time": 2, "baseline_id": 3, "frequency": 8}
+])
 def test_tensorstore_arrays_open_datatree(
-  register_meerkat_chunkmanager, register_dummy_engine
+  register_meerkat_chunkmanager, register_dummy_engine, chunks
 ):
   """Tests that opening tensorstore backend arrays with the MeerKatArray
   Chunked Array type works"""
   dt = xarray.open_datatree(
-    "don't-care", engine="test-backend", chunked_array_type="meerkat", chunks={}
+    "don't-care", engine="test-backend", chunked_array_type="meerkat", chunks=chunks
   )
+
+  flag = dt["a"].FLAG
+  expected_chunks = normalize_chunks(
+    tuple(chunks.get(d, c) for (d, c) in zip(flag.dims, flag.chunks)),
+    flag.shape
+  )
+
   shape = dt["a"].FLAG.shape
   ramp = np.arange(np.prod(shape)).reshape(shape).astype(np.float32)
   key = {"time": slice(2, 4), "baseline_id": [1, 3, 4], "frequency": slice(4, 12)}
   assert isinstance(dt["a"].WEIGHT.data, MeerkatArray)
   assert isinstance(dt["a"].VISIBILITY.data, MeerkatArray)
+  assert dt["a"].WEIGHT.data.chunks == expected_chunks
+  assert dt["a"].VISIBILITY.data.chunks == expected_chunks
   assert isinstance(dt["b"].WEIGHT.data, MeerkatArray)
   assert isinstance(dt["b"].VISIBILITY.data, MeerkatArray)
+  assert dt["b"].WEIGHT.data.chunks == expected_chunks
+  assert dt["b"].VISIBILITY.data.chunks == expected_chunks
 
   dt = dt.isel(**key)
   dt.load()
