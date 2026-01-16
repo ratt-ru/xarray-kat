@@ -45,7 +45,7 @@ class MeerkatArray:
 
   def __getitem__(self, key):
     xkey = expanded_indexer(key, self.array.ndim)
-    if any(isinstance(k, OuterIndexerType) for k in xkey):
+    if any(isinstance(k, np.ndarray) for k in xkey):
       array = self.array.oindex[OuterIndexer(xkey)]
     else:
       array = self.array[BasicIndexer(xkey)]
