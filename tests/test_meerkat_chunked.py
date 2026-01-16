@@ -1,11 +1,17 @@
 import numpy as np
+import numpy.typing as npt
 import pytest
+import tensorstore as ts
 import xarray
 from numpy.testing import assert_array_equal
-from xarray.backends import BackendArray
+from xarray.backends import BackendArray, BackendEntrypoint
 from xarray.core.indexing import (
+  BasicIndexer,
+  ExplicitlyIndexedNDArrayMixin,
   IndexingSupport,
   LazilyIndexedArray,
+  OuterIndexer,
+  VectorizedIndexer,
   explicit_indexing_adapter,
 )
 from xarray.namedarray.parallelcompat import (
@@ -15,6 +21,13 @@ from xarray.namedarray.parallelcompat import (
 )
 
 from xarray_kat.meerkat_chunk_manager import MeerkatArray, MeerKatChunkManager
+
+
+@pytest.fixture(params=[{"shape": (4, 5), "dtype": np.complex64}])
+def ramp_data(request):
+  shape = request.param["shape"]
+  dtype = request.param["dtype"]
+  return np.arange(np.prod(shape)).reshape(shape).astype(dtype)
 
 
 class DummyArray(BackendArray):
@@ -77,7 +90,7 @@ ALL_DIMS = TBL_DIMS + ("frequency", "polarization")
 
 
 @pytest.fixture
-def small_meerkat_ds(request):
+def small_ds(request):
   def Array(a):
     return LazilyIndexedArray(DummyArray(a))
 
@@ -93,8 +106,8 @@ def small_meerkat_ds(request):
   )
 
 
-def test_load_backend_arrays(register_meerkat_chunkmanager, small_meerkat_ds):
-  ds = small_meerkat_ds
+def test_load_backend_arrays(register_meerkat_chunkmanager, small_ds):
+  ds = small_ds
   assert (mgr := guess_chunkmanager("meerkat")) is not None
   shape = tuple(ds.sizes[d] for d in ALL_DIMS)
   chunks = mgr.normalize_chunks(ALL_CHUNKS, shape)
@@ -105,9 +118,7 @@ def test_load_backend_arrays(register_meerkat_chunkmanager, small_meerkat_ds):
   assert isinstance(ds.WEIGHT.variable._data, LazilyIndexedArray)
   assert isinstance(ds.DATA.variable._data, LazilyIndexedArray)
 
-  ds = small_meerkat_ds.chunk(
-    dict(zip(ALL_DIMS, ALL_CHUNKS)), chunked_array_type="meerkat"
-  )
+  ds = small_ds.chunk(dict(zip(ALL_DIMS, ALL_CHUNKS)), chunked_array_type="meerkat")
 
   assert isinstance(uvw := ds.UVW.data, MeerkatArray) and uvw.chunks == uvw_chunks
   assert isinstance(flag := ds.FLAG.data, MeerkatArray) and flag.chunks == chunks
@@ -129,8 +140,8 @@ def test_load_backend_arrays(register_meerkat_chunkmanager, small_meerkat_ds):
   np.testing.assert_array_equal(ramp + ramp * 1j, ds.DATA.data)
 
 
-def test_load_backend_arrays_isel(register_meerkat_chunkmanager, small_meerkat_ds):
-  ds = small_meerkat_ds
+def test_load_backend_arrays_isel(register_meerkat_chunkmanager, small_ds):
+  ds = small_ds
   assert (mgr := guess_chunkmanager("meerkat")) is not None
   shape = tuple(ds.sizes[d] for d in ALL_DIMS)
   chunks = mgr.normalize_chunks(ALL_CHUNKS, shape)
@@ -143,9 +154,7 @@ def test_load_backend_arrays_isel(register_meerkat_chunkmanager, small_meerkat_d
   assert isinstance(ds.WEIGHT.variable._data, LazilyIndexedArray)
   assert isinstance(ds.DATA.variable._data, LazilyIndexedArray)
 
-  ds = small_meerkat_ds.chunk(
-    dict(zip(ALL_DIMS, ALL_CHUNKS)), chunked_array_type="meerkat"
-  )
+  ds = small_ds.chunk(dict(zip(ALL_DIMS, ALL_CHUNKS)), chunked_array_type="meerkat")
 
   assert isinstance(uvw := ds.UVW.data, MeerkatArray) and uvw.chunks == uvw_chunks
   assert isinstance(flag := ds.FLAG.data, MeerkatArray) and flag.chunks == chunks
@@ -169,3 +178,138 @@ def test_load_backend_arrays_isel(register_meerkat_chunkmanager, small_meerkat_d
   # that matches the selection
   assert_array_equal(ramp[key], ds.WEIGHT.data)
   assert_array_equal((ramp + ramp * 1j)[key], ds.DATA.data)
+
+
+class WrappedTensorStore(ExplicitlyIndexedNDArrayMixin):
+  __slots__ = ("array",)
+
+  @property
+  def dtype(self) -> npt.DTypeLike:
+    return self.array.dtype.numpy_dtype
+
+  def __init__(self, array):
+    self.array = array
+
+  def get_duck_array(self):
+    return self.array
+
+  async def async_get_duck_array(self):
+    return self.array
+
+  def _oindex_get(self, indexer: OuterIndexer):
+    return WrappedTensorStore(self.array.oindex[indexer.tuple])
+
+  def _vindex_get(self, indexer: VectorizedIndexer):
+    return WrappedTensorStore(self.array.vindex[indexer.tuple])
+
+  def __getitem__(self, indexer):
+    return WrappedTensorStore(self.array[indexer.tuple])
+
+
+class TensorstoreBackendArray(WrappedTensorStore, BackendArray):
+  def __init__(self, array):
+    super().__init__(array)
+
+  def __getitem__(self, key):
+    return explicit_indexing_adapter(
+      key, self.shape, IndexingSupport.OUTER, self._getitem
+    )
+
+  def _getitem(self, key):
+    return WrappedTensorStore(self.array[key])
+
+
+def test_tensorstore_backend_array(register_meerkat_chunkmanager, ramp_data):
+  A = TensorstoreBackendArray(ts.array(ramp_data))
+  M = MeerkatArray(A, (2, 3))
+  L = LazilyIndexedArray(A)
+  V = L[BasicIndexer((slice(1, 3), slice(2, 4)))]
+  assert isinstance(V.get_duck_array(), ts.TensorStore)
+
+  ds = xarray.Dataset({"M": (("x", "y"), M)})
+  key = {"x": slice(1, 3), "y": [1, 4]}
+  ds = ds.isel(**key)
+  ds.load()
+
+  assert_array_equal(ds.M.data, ramp_data[key["x"], key["y"]])
+
+
+class DummyBackendEntryPoint(BackendEntrypoint):
+  description = "Dummy Testing Backend"
+  supports_groups = True
+
+  def open_datatree(self, filename_or_obj, *, drop_variables=None):
+    return xarray.DataTree.from_dict(
+      self.open_groups_as_dict(filename_or_obj, drop_variables=drop_variables)
+    )
+
+  def open_groups_as_dict(self, filename_or_obj, *, drop_variables=None):
+    def Array(a):
+      return TensorstoreBackendArray(ts.array(a))
+
+    ramp = np.arange(np.prod(ALL)).astype(np.float32).reshape(ALL)
+
+    ds = xarray.Dataset(
+      {
+        "UVW": (UVW_DIMS, Array(np.zeros(TBL + (3,)))),
+        "FLAG": (ALL_DIMS, Array(np.ones(ALL, np.uint8))),
+        "WEIGHT": (ALL_DIMS, Array(ramp)),
+        "VISIBILITY": (ALL_DIMS, Array(ramp + ramp * 1j)),
+      }
+    )
+
+    return {"a": ds, "b": ds}
+
+
+@pytest.fixture
+def register_dummy_engine(monkeypatch):
+  """Mock registration of a ChunkManagerEntrypoint"""
+  from xarray.backends.plugins import list_engines
+
+  engines = list_engines()
+
+  monkeypatch.setattr(
+    "xarray.backends.plugins.list_engines",
+    lambda: engines | {"test-backend": DummyBackendEntryPoint()},
+  )
+  yield
+
+
+def test_tensorstore_arrays_open_datatree(
+  register_meerkat_chunkmanager, register_dummy_engine
+):
+  """Tests that opening tensorstore backend arrays with the MeerKatArray
+  Chunked Array type works"""
+  dt = xarray.open_datatree(
+    "don't-care", engine="test-backend", chunked_array_type="meerkat", chunks={}
+  )
+  shape = dt["a"].FLAG.shape
+  ramp = np.arange(np.prod(shape)).reshape(shape).astype(np.float32)
+  key = {"time": slice(2, 4), "baseline_id": [1, 3, 4], "frequency": slice(4, 12)}
+  assert isinstance(dt["a"].WEIGHT.data, MeerkatArray)
+  assert isinstance(dt["a"].VISIBILITY.data, MeerkatArray)
+  assert isinstance(dt["b"].WEIGHT.data, MeerkatArray)
+  assert isinstance(dt["b"].VISIBILITY.data, MeerkatArray)
+
+  dt = dt.isel(**key)
+  dt.load()
+
+  sel_ramp = ramp[tuple(key.values())]
+
+  assert isinstance(dt["a"].WEIGHT.data, np.ndarray)
+  assert isinstance(dt["a"].VISIBILITY.data, np.ndarray)
+  assert isinstance(dt["b"].WEIGHT.data, np.ndarray)
+  assert isinstance(dt["b"].VISIBILITY.data, np.ndarray)
+
+  assert_array_equal(dt["a"].WEIGHT, sel_ramp)
+  assert_array_equal(dt["a"].VISIBILITY, sel_ramp + sel_ramp * 1j)
+  assert_array_equal(dt["b"].WEIGHT, sel_ramp)
+  assert_array_equal(dt["b"].VISIBILITY, sel_ramp + sel_ramp * 1j)
+
+
+def test_tensorstore_wrapped_array(register_meerkat_chunkmanager, ramp_data):
+  A = WrappedTensorStore(ts.array(ramp_data))
+  assert A.dtype == np.complex64
+  assert A.shape == (4, 5)
+  key = (slice(1, 3), slice(2, 4))
+  assert_array_equal(A[BasicIndexer(key)], ramp_data[key])
