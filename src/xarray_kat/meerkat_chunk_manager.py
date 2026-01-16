@@ -144,9 +144,10 @@ class MeerKatChunkManager(ChunkManagerEntrypoint):
     if limit is not None:
       warnings.warn(f"limit {limit} ignored in normalize_chunks", UserWarning)
 
-    if previous_chunks is not None:
+    if previous_chunks is not None and previous_chunks != chunks:
       warnings.warn(
-        f"previous_chunks {previous_chunks} ignored in normalize_chunks", UserWarning
+        f"previous_chunks {previous_chunks} ignored in normalize_chunks({chunks})",
+        UserWarning,
       )
 
     return normalize_chunks(chunks, shape)
