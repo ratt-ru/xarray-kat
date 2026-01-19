@@ -5,6 +5,7 @@ from typing import Any, Tuple
 
 import numpy as np
 import numpy.typing as npt
+import tensorstore as ts
 from xarray.core.indexing import (
   BasicIndexer,
   ImplicitToExplicitIndexingAdapter,
@@ -206,8 +207,19 @@ class MeerKatChunkManager(ChunkManagerEntrypoint):
 
         for dim_coord_pairs in product(*(pairwise(r) for r in ranges)):
           key = tuple(slice(s, e) for s, e in dim_coord_pairs)
-          for index, array in zip(indices, arrays):
-            (results[index][key],) = array[key].compute()
+          with ts.Batch() as b:
+            sources = []
+            dests = []
+            for index, array in zip(indices, arrays):
+              if isinstance(source := array[key].compute()[0], ts.TensorStore):
+                sources.append(source.read(batch=b))
+              else:
+                sources.append(source)
+
+              dests.append(results[index][key])
+
+            for s, d in zip(sources, dests):
+              d[...] = s.result() if isinstance(s, ts.Future) else s
 
     return results
 
