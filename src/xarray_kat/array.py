@@ -178,7 +178,7 @@ class CorrProductArray(CorrProductMixin, AbstractMeerkatArchiveArray):
 
   @property
   def dtype(self) -> npt.DTypeLike:
-    return np.dtype(self._store.instance.dtype.type)
+    return self._store.instance.dtype.numpy_dtype
 
   def __getitem__(self, key) -> npt.NDArray:
     return explicit_indexing_adapter(
