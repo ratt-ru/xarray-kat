@@ -47,15 +47,15 @@ def interleaved_vfw_store(
   Returns:
     A tensorstore
   """
-  vis_dtype = vis_store.instance.dtype.numpy_dtype()
+  vis_dtype = vis_store.instance.dtype.numpy_dtype
   vis_bytes = vis_dtype.itemsize
-  weight_dtype = channel_weights_store.instance.dtype.numpy_dtype()
+  weight_dtype = channel_weights_store.instance.dtype.numpy_dtype
   weight_bytes = weight_dtype.itemsize
-  flag_dtype = flag_store.instance.dtype.numpy_dtype()
+  flag_dtype = flag_store.instance.dtype.numpy_dtype
   flag_bytes = flag_dtype.itemsize
   vfw_bytes = vis_bytes + weight_bytes + flag_bytes
   store_shape = (vfw_bytes,) + vis_store.instance.shape
-  store_labels = ("bytes",) + vis_store.instance.dim_labels
+  store_labels = ("bytes",) + vis_store.instance.domain.labels
   store_chunks = (vfw_bytes,) + vis_store.instance.chunk_layout.read_chunk.shape
 
   def read_chunk(
@@ -77,11 +77,14 @@ def interleaved_vfw_store(
         f"flags: {flag_store.instance.shape}"
       )
 
+    # Strip out the bytes dimension
+    subdomain = domain[1:]
+
     # Issue data retrieval futures in increasing order of size
-    (flag_future := flag_store.instance[domain].read()).force()
-    (iw_future := iws[domain].read()).force()
-    (cw_future := cws[domain[:-1]].read()).force()
-    (vis_future := vis_store.instance[domain].read()).force()
+    (flag_future := flag_store.instance[subdomain].read()).force()
+    (iw_future := iws[subdomain].read()).force()
+    (cw_future := cws[subdomain[:-1]].read()).force()
+    (vis_future := vis_store.instance[subdomain].read()).force()
 
     # Possibly prepare calibration solutions
     # while I/O operations are in flight
@@ -109,27 +112,17 @@ def interleaved_vfw_store(
     assert flag_view.base is array, "View doesn't reference base array"
 
     # Read results into the result array in order of increasing size
-    if (flags := flag_future.result()).state != "value":
-      raise RuntimeError(f"Reading flags failed {flags.result().state}")
+    flag_view[:] = flag_future.result()
+    data_lost = flag_dtype.type(DATA_LOST)
+    zero_flag = flag_dtype.type(0)
 
-    flag_view[:] = flags
-
-    if (weights := iw_future.result()).state != "value":
-      raise RuntimeError(f"Reading integer weights failed {iw_future.result().state}")
-
+    weights = iw_future.result()
+    weights *= cw_future.result()[:, :, None]
     weight_view[:] = weights
+    flag_view[:] |= np.where(weight_view == 0, data_lost, zero_flag)
 
-    if (cweights := cw_future.result()).state != "value":
-      raise RuntimeError(f"Reading channel weights failed {cweights.result().state}")
-
-    weight_view[:] *= cweights[..., None]
-    flag_view[:] |= np.where(weight_view == 0, DATA_LOST, 0)
-
-    if (vis := vis_future.result()).state != "value":
-      raise RuntimeError(f"Visibility future failed {vis_future.result().state}")
-
-    vis_view[:] = vis
-    flag_view[:] |= np.where(vis_view == 0j, DATA_LOST, 0)
+    vis_view[:] = vis_future.result()
+    flag_view[:] |= np.where(vis_view == 0j, data_lost, zero_flag)
 
     # Apply weight scaling
     weight_power_scale(
