@@ -80,6 +80,8 @@ def _index_store(store: Multiton[ts.TensorStore], index) -> ts.TensorStore:
 
 
 class DataTreeFactory:
+  _chunks: Dict[str, int] | None
+  _chunked_array_type: str | None
   _preferred_chunks: Dict[str, int]
   _data_products: Multiton[TelstateDataProducts]
   _scan_states: Set[str]
@@ -90,6 +92,8 @@ class DataTreeFactory:
 
   def __init__(
     self,
+    chunks: Dict[str, int] | None,
+    chunked_array_type: str | None,
     preferred_chunks: Dict[str, int],
     data_products: Multiton[TelstateDataProducts],
     applycal: str | Iterable[str],
@@ -98,6 +102,8 @@ class DataTreeFactory:
     endpoint: str,
     token: str | None = None,
   ):
+    self._chunks = chunks
+    self._chunked_array_type = chunked_array_type
     self._preferred_chunks = preferred_chunks
     self._data_products = data_products
     self._applycal = applycal

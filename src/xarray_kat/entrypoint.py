@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import inspect
 import os
-from typing import TYPE_CHECKING, Any, Dict, Iterable
+from types import FrameType
+from typing import TYPE_CHECKING, Any, Dict, Iterable, Tuple
 from urllib.parse import SplitResult, parse_qs, urlsplit
 
 from xarray import DataTree
 from xarray.backends import BackendEntrypoint
+from xarray.backends.api import open_datatree, open_groups
 from xarray.backends.common import AbstractDataStore
 
 if TYPE_CHECKING:
@@ -54,6 +57,25 @@ class KatEntryPoint(BackendEntrypoint):
       )
     )
 
+
+  @staticmethod
+  def infer_api_chunking(
+    frame: FrameType | None, depth: int = 10
+  ) -> Tuple[Dict[str, int] | None, str | None]:
+    chunks = None
+    array_type = None
+
+    while frame and depth > 0 and chunks is None and array_type is None:
+      if frame.f_code in {open_groups.__code__, open_datatree.__code__}:
+        chunks = chunks or frame.f_locals.get("chunks")
+        array_type = array_type or frame.f_locals.get("chunked_array_type")
+
+      depth -= 1
+      frame = frame.f_back
+
+    return chunks, array_type
+
+
   def open_datatree(
     self,
     filename_or_obj,
@@ -94,6 +116,8 @@ class KatEntryPoint(BackendEntrypoint):
     urlbits = urlsplit(url)
     assert urlbits.scheme in {"http", "https"}
 
+    chunks, array_type = self.infer_api_chunking(inspect.currentframe().f_back)
+
     token = parse_qs(urlbits.query).get("token", [None])[0]
     datasource = Multiton(
       TelstateDataSource.from_url,
@@ -111,6 +135,8 @@ class KatEntryPoint(BackendEntrypoint):
     endpoint = SplitResult(urlbits.scheme, urlbits.netloc, "", "", "").geturl()
 
     group_factory = DataTreeFactory(
+      chunks,
+      array_type,
       {} if preferred_chunks is None else preferred_chunks,
       telstate_data_products,
       applycal,
