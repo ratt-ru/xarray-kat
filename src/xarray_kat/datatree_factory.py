@@ -78,7 +78,7 @@ def _corrprods_to_baseline_pols(corrprods: npt.NDArray):
   return result
 
 
-def _index_store(store: Multiton[ts.TensorStore], index, origin = 0) -> ts.TensorStore:
+def _index_store(store: Multiton[ts.TensorStore], index, origin=0) -> ts.TensorStore:
   """Helper function for delaying indexing of a TensorStore held by a Multiton.
   Commonly this is used to slice the time axis of the entire observation into
   separate scans/partitions. For this reason the origin is reset to zero"""
