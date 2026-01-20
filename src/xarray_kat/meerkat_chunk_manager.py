@@ -1,7 +1,8 @@
 import warnings
-from collections import defaultdict
+from collections import defaultdict, deque
+from dataclasses import dataclass
 from itertools import pairwise, product
-from typing import Any, Tuple
+from typing import Any, Deque, Tuple
 
 import numpy as np
 import numpy.typing as npt
@@ -19,6 +20,7 @@ from xarray.core.types import T_Chunks, T_DuckArray, T_NormalizedChunks
 from xarray.namedarray._typing import _Chunks
 from xarray.namedarray.parallelcompat import ChunkManagerEntrypoint
 
+from xarray_kat.array import DelayedTensorStore
 from xarray_kat.utils import normalize_chunks
 from xarray_kat.utils.chunk_selection import chunk_ranges
 
@@ -117,11 +119,24 @@ class MeerkatArray:
     )
 
 
-def split_key(key):
-  """Split key into source and destination keys"""
-  return tuple(
-    zip(*((k[0], k[1]) if isinstance(k, np.ndarray) else (k, k) for k in key))
-  )
+@dataclass
+class ReadWriteWorkItem:
+  """Encapsulates an assignment of data from a destination to a source,
+  possibly as part of a batch"""
+
+  dest: Any
+  source: Any
+  batch: Any
+
+  def __post_init__(self):
+    # Issue any (batched) futures
+    if isinstance(self.source, DelayedTensorStore):
+      self.source = self.source.get_duck_array().read(batch=self.batch)
+
+  def execute(self):
+    self.dest[:] = (
+      self.source.result() if isinstance(self.source, ts.Future) else self.source
+    )
 
 
 class MeerKatChunkManager(ChunkManagerEntrypoint):
@@ -176,12 +191,6 @@ class MeerKatChunkManager(ChunkManagerEntrypoint):
     if not all(isinstance(d, MeerkatArray) for d in data):
       raise TypeError(f"Arrays {[type(d) for d in data]} are not {MeerkatArray}")
 
-    if not all(data[0].chunks[:2] == d.chunks[:2] for d in data[1:]):
-      raise ValueError(
-        "Arrays do not share the same chunking schema "
-        "in the (time, baseline_id) dimensions"
-      )
-
     results = tuple(np.empty(a.shape, a.dtype) for a in data)
 
     # Group arrays by their chunking schema
@@ -193,33 +202,37 @@ class MeerKatChunkManager(ChunkManagerEntrypoint):
     for index, array in enumerate(data):
       same_chunks[array.chunks].append((index, array))
 
+    # Pipeline retrieval of data
+    pipeline: Deque[ReadWriteWorkItem] = deque()
+    MAX_IN_FLIGHT = 10
+
     # Iterate over groups of arrays with the same chunking
     for chunks, index_and_array in same_chunks.items():
+      while len(pipeline) >= MAX_IN_FLIGHT:
+        pipeline.popleft().execute()
+
       if len(index_and_array) == 1:
         # If the group contains a single array, we choose not
         # to load data chunk-wise
         index, array = index_and_array[0]
-        (results[index][...],) = array.compute()
+        pipeline.append(
+          ReadWriteWorkItem(results[index][...], array.compute()[0], None)
+        )
       else:
         # Load data chunk-wise over arrays in a group,
         ranges = [np.concatenate(([0], np.cumsum(c))) for c in chunks]
         indices, arrays = zip(*index_and_array)
 
         for dim_coord_pairs in product(*(pairwise(r) for r in ranges)):
-          key = tuple(slice(s, e) for s, e in dim_coord_pairs)
           with ts.Batch() as b:
-            sources = []
-            dests = []
+            key = tuple(slice(s, e) for s, e in dim_coord_pairs)
             for index, array in zip(indices, arrays):
-              if isinstance(source := array[key].compute()[0], ts.TensorStore):
-                sources.append(source.read(batch=b))
-              else:
-                sources.append(source)
+              pipeline.append(
+                ReadWriteWorkItem(results[index][key], array[key].compute()[0], b)
+              )
 
-              dests.append(results[index][key])
-
-            for s, d in zip(sources, dests):
-              d[...] = s.result() if isinstance(s, ts.Future) else s
+    while len(pipeline) > 0:
+      pipeline.popleft().execute()
 
     return results
 
