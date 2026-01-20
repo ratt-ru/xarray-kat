@@ -28,7 +28,7 @@ the data:
   url = f"https://archive-gw-1.kat.ac.za/{capture_block_id}/{capture_block_id}_sdp_l0.full.rdb?token={token}"
 
   # If the dataset is small you may be able to load it all in at once
-  dt = xarray.open_datatree(url)
+  dt = xarray.open_datatree(url, chunked_array_type="xarray-kat", chunks={})
   dt.load()
 
   # Otherwise one can select a small partition of the data
