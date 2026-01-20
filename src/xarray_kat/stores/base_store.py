@@ -2,7 +2,6 @@ import logging
 from functools import reduce
 from io import BytesIO
 from operator import mul
-from typing import Any, Dict, Tuple
 
 import numpy as np
 import numpy.typing as npt
@@ -10,6 +9,7 @@ import tensorstore as ts
 from numpy.lib.format import read_array_header_1_0, read_array_header_2_0, read_magic
 
 from xarray_kat.multiton import Multiton
+from xarray_kat.types import ArchiveArrayMetadata
 
 log = logging.getLogger(__name__)
 
@@ -47,9 +47,7 @@ def read_array(raw_bytes: bytes) -> npt.NDArray | None:
 
 def base_virtual_store(
   http_store: Multiton[ts.TensorStore],
-  data_schema: Dict[str, Any],
-  dim_labels: Tuple[str, ...],
-  missing_value: Any,
+  array_meta: ArchiveArrayMetadata,
   context: ts.Context,
 ) -> ts.TensorStore:
   """Creates a virtual_chunked TensorStore over a set of keys in an http_store.
@@ -66,11 +64,8 @@ def base_virtual_store(
     context: TensorStore context to associated with the returned
       store.
   """
-  dtype = data_schema["dtype"]
-  chunks = data_schema["chunks"]
-  shape = tuple(sum(dc) for dc in chunks)
-  if not all(all(dc[0] == c for c in dc[1:-1]) for dc in chunks):
-    raise ValueError(f"{chunks} are not homogenous")
+
+  missing_value = array_meta.default
 
   def read_chunk(
     domain: ts.IndexDomain, array: np.ndarray, params: ts.VirtualChunkedReadParameters
@@ -106,11 +101,14 @@ def base_virtual_store(
 
   return ts.virtual_chunked(
     read_function=read_chunk,
-    rank=len(shape),
+    rank=len(array_meta.shape),
     domain=ts.IndexDomain(
-      [ts.Dim(size=s, label=ll) for s, ll in zip(shape, dim_labels)]
+      [
+        ts.Dim(size=s, label=ll)
+        for s, ll in zip(array_meta.shape, array_meta.dim_labels)
+      ]
     ),
-    dtype=dtype,
-    chunk_layout=ts.ChunkLayout(chunk_shape=[c[0] for c in chunks]),
+    dtype=array_meta.dtype,
+    chunk_layout=ts.ChunkLayout(chunk_shape=array_meta.chunks),
     context=context,
   )
