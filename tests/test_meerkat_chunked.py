@@ -413,6 +413,7 @@ def test_tensorstore_arrays_open_datatree_dask_chunks(
   """Tests that opening tensorstore backend arrays with the MeerKatArray
   Chunked Array type works"""
   da = pytest.importorskip("dask.array")
+  dac = pytest.importorskip("dask.array.core")
   dt = xarray.open_datatree(
     "s3://remote-url-to-mollify-mtime",
     engine="test-backend",
@@ -421,7 +422,7 @@ def test_tensorstore_arrays_open_datatree_dask_chunks(
   )
 
   flag = dt["a"].FLAG
-  expected_chunks = normalize_chunks(
+  expected_chunks = dac.normalize_chunks(
     tuple(chunks.get(d, c) for (d, c) in zip(flag.dims, flag.chunks)), flag.shape
   )
 
