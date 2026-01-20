@@ -103,22 +103,25 @@ def interleaved_vfw_store(
     weight_slice = slice(pos, pos := pos + weight_bytes)
     flag_slice = slice(pos, pos := pos + flag_bytes)
 
-    vis_view = array[vis_slice].ravel().view(vis_dtype).reshape(data_shape)
-    weight_view = array[weight_slice].ravel().view(weight_dtype).reshape(data_shape)
-    flag_view = array[flag_slice].ravel().view(flag_dtype).reshape(data_shape)
+    def _view(a, dt):
+      return a.ravel().view(dt).reshape(data_shape)
 
-    assert vis_view.base is array, "View doesn't reference base array"
-    assert weight_view.base is array, "View doesn't reference base array"
-    assert flag_view.base is array, "View doesn't reference base array"
+    if (vis_view := _view(array[vis_slice], vis_dtype)).base is not array:
+      raise RuntimeError("Visibility view doesn't reference base array")
+
+    if (weight_view := _view(array[weight_slice], weight_dtype)).base is not array:
+      raise RuntimeError("Weight view doesn't reference base array")
+
+    if (flag_view := _view(array[flag_slice], flag_dtype)).base is not array:
+      raise RuntimeError("Flag view doesn't reference base array")
 
     # Read results into the result array in order of increasing size
     flag_view[:] = flag_future.result()
     data_lost = flag_dtype.type(DATA_LOST)
     zero_flag = flag_dtype.type(0)
 
-    weights = iw_future.result()
-    weights *= cw_future.result()[:, :, None]
-    weight_view[:] = weights
+    weight_view[:] = iw_future.result()
+    weight_view[:] *= cw_future.result()[:, :, None]
     flag_view[:] |= np.where(weight_view == 0, data_lost, zero_flag)
 
     vis_view[:] = vis_future.result()
