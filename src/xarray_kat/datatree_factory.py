@@ -14,7 +14,11 @@ import tensorstore as ts
 import xarray
 from xarray.core.indexing import LazilyIndexedArray
 
-from xarray_kat.array import AbstractMeerkatArchiveArray, DelayedCorrProductArray, ImmediateCorrProductArray
+from xarray_kat.array import (
+  AbstractMeerkatArchiveArray,
+  DelayedCorrProductArray,
+  ImmediateCorrProductArray,
+)
 from xarray_kat.katdal_types import corrprod_to_autocorr
 from xarray_kat.multiton import Multiton
 from xarray_kat.stores.vis_weight_flag_store_factory import VisWeightFlagFactory
@@ -143,10 +147,10 @@ class DataTreeFactory:
     else:
       warnings.warn(
         f"xarray.open_{{groups,datatree}} was invoked without "
-        f"the \"chunks\" argument. This should be specified, "
-        f"along with the \"chunked_array_type\" ({self._chunked_array_type}), "
-        f"which should be set to \"xarray-kat\" or \"dask\"",
-        UserWarning
+        f'the "chunks" argument. This should be specified, '
+        f'along with the "chunked_array_type" ({self._chunked_array_type}), '
+        f'which should be set to "xarray-kat" or "dask"',
+        UserWarning,
       )
       ArrayClass = ImmediateCorrProductArray
 

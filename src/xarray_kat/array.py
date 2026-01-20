@@ -153,10 +153,10 @@ class CorrProductMixin:
     return (0, 2, 1, 3)
 
 
-
 class DelayedTensorStore(ExplicitlyIndexedNDArrayMixin):
   """A wrapper for TensorStores that only produces new
   DelayedTensorStores when indexed"""
+
   __slots__ = ("array",)
 
   array: ts.TensorStore
@@ -222,7 +222,6 @@ class ImmediateTensorBackendArray(ImmediateTensorStore, BackendArray):
     super().__init__(array)
 
 
-
 class DelayedCorrProductArray(CorrProductMixin, AbstractMeerkatArchiveArray):
   """Wraps a ``(time, frequency, corrprod)``` TensorStore.
 
@@ -260,9 +259,9 @@ class DelayedCorrProductArray(CorrProductMixin, AbstractMeerkatArchiveArray):
 
   def _getitem(self, key) -> DelayedTensorStore:
     return DelayedTensorStore(
-      self._store.instance[self.meerkat_key(key)]
-      .transpose(self.transpose_axes)
+      self._store.instance[self.meerkat_key(key)].transpose(self.transpose_axes)
     )
+
 
 class ImmediateCorrProductArray(DelayedCorrProductArray):
   def __init__(

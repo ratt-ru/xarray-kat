@@ -57,7 +57,6 @@ class KatEntryPoint(BackendEntrypoint):
       )
     )
 
-
   @staticmethod
   def infer_api_chunking(
     frame: FrameType | None, depth: int = 10
@@ -74,7 +73,6 @@ class KatEntryPoint(BackendEntrypoint):
       frame = frame.f_back
 
     return chunks, array_type
-
 
   def open_datatree(
     self,
@@ -116,7 +114,11 @@ class KatEntryPoint(BackendEntrypoint):
     urlbits = urlsplit(url)
     assert urlbits.scheme in {"http", "https"}
 
-    chunks, array_type = self.infer_api_chunking(inspect.currentframe().f_back)
+    chunks = None
+    array_type = None
+
+    if (frame := inspect.currentframe()) is not None:
+      chunks, array_type = self.infer_api_chunking(frame.f_back)
 
     token = parse_qs(urlbits.query).get("token", [None])[0]
     datasource = Multiton(
