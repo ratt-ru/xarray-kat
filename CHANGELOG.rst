@@ -3,6 +3,7 @@ Changelog
 
 X.Y.Z (DD-MM-YYY)
 -----------------
+* Reset the origin of each TensorStore to zero for each partition/scan (:pr:`35`)
 * Use ArchiveArrayMetadata dataclass in http store construction (:pr:`34`)
 * Implement a Chunked Storage Manager (:pr:`33`)
 * Support preferred chunking and ensure consistent chunking across visibilities, weights and flags  (:pr:`32`)

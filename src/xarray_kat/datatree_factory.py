@@ -78,9 +78,11 @@ def _corrprods_to_baseline_pols(corrprods: npt.NDArray):
   return result
 
 
-def _index_store(store: Multiton[ts.TensorStore], index) -> ts.TensorStore:
-  """Helper function for delaying indexing of a TensorStore held by a Multiton"""
-  return store.instance[index]
+def _index_store(store: Multiton[ts.TensorStore], index, origin=0) -> ts.TensorStore:
+  """Helper function for delaying indexing of a TensorStore held by a Multiton.
+  Commonly this is used to slice the time axis of the entire observation into
+  separate scans/partitions. For this reason the origin is reset to zero"""
+  return store.instance[index].translate_to[origin]
 
 
 class DataTreeFactory:
@@ -144,6 +146,9 @@ class DataTreeFactory:
   def create(self) -> Dict[str, xarray.Dataset]:
     if self._chunks is not None:
       ArrayClass = DelayedCorrProductArray
+
+      def WrappedArray(a):
+        return a
     else:
       warnings.warn(
         f"xarray.open_{{groups,datatree}} was invoked without "
@@ -153,6 +158,9 @@ class DataTreeFactory:
         UserWarning,
       )
       ArrayClass = ImmediateCorrProductArray
+
+      def WrappedArray(a):
+        return LazilyIndexedArray(a)
 
     telstate = self._data_products.instance.telstate
     chunk_info = telstate["chunk_info"]
@@ -263,7 +271,7 @@ class DataTreeFactory:
       data_vars = {
         n: xarray.Variable(
           a.dims,
-          LazilyIndexedArray(a),
+          WrappedArray(a),
           None,
           {"preferred_chunks": self.merge_chunks(n, a)},
         )
