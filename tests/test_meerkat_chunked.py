@@ -1,3 +1,7 @@
+import inspect
+from types import FrameType
+from typing import Dict, Tuple
+
 import numpy as np
 import numpy.typing as npt
 import pytest
@@ -5,6 +9,7 @@ import tensorstore as ts
 import xarray
 from numpy.testing import assert_array_equal
 from xarray.backends import BackendArray, BackendEntrypoint
+from xarray.backends.api import open_datatree, open_groups
 from xarray.core.indexing import (
   BasicIndexer,
   ExplicitlyIndexedNDArrayMixin,
@@ -22,6 +27,7 @@ from xarray.namedarray.parallelcompat import (
 
 from xarray_kat.meerkat_chunk_manager import MeerkatArray, MeerKatChunkManager
 from xarray_kat.utils import normalize_chunks
+
 
 @pytest.fixture(params=[{"shape": (4, 5), "dtype": np.complex64}])
 def ramp_data(request):
@@ -107,7 +113,7 @@ def small_ds(request):
 
 
 def test_chunk_backend_arrays(register_meerkat_chunkmanager, small_ds):
-  """ Tests rechunking into chunked MeerKatArrays"""
+  """Tests rechunking into chunked MeerKatArrays"""
   ds = small_ds
   assert (mgr := guess_chunkmanager("meerkat")) is not None
   shape = tuple(ds.sizes[d] for d in ALL_DIMS)
@@ -182,15 +188,17 @@ def test_load_backend_arrays_isel(register_meerkat_chunkmanager, small_ds):
   assert_array_equal((ramp + ramp * 1j)[key], ds.DATA.data)
 
 
-class WrappedTensorStore(ExplicitlyIndexedNDArrayMixin):
+class DelayedTensorStore(ExplicitlyIndexedNDArrayMixin):
   __slots__ = ("array",)
+
+  array: ts.TensorStore
+
+  def __init__(self, array):
+    self.array = array
 
   @property
   def dtype(self) -> npt.DTypeLike:
     return self.array.dtype.numpy_dtype
-
-  def __init__(self, array):
-    self.array = array
 
   def get_duck_array(self):
     return self.array
@@ -199,35 +207,59 @@ class WrappedTensorStore(ExplicitlyIndexedNDArrayMixin):
     return self.array
 
   def _oindex_get(self, indexer: OuterIndexer):
-    return WrappedTensorStore(self.array.oindex[indexer.tuple])
+    return DelayedTensorStore(self.array.oindex[indexer.tuple])
 
   def _vindex_get(self, indexer: VectorizedIndexer):
-    return WrappedTensorStore(self.array.vindex[indexer.tuple])
+    return DelayedTensorStore(self.array.vindex[indexer.tuple])
 
-  def __getitem__(self, indexer):
-    return WrappedTensorStore(self.array[indexer.tuple])
+  def __getitem__(self, key):
+    return DelayedTensorStore(self.array[key.tuple])
 
 
-class TensorstoreBackendArray(WrappedTensorStore, BackendArray):
+class DelayedTensorStoreBackendArray(DelayedTensorStore, BackendArray):
   def __init__(self, array):
     super().__init__(array)
 
-  def __getitem__(self, key):
-    return explicit_indexing_adapter(
-      key, self.shape, IndexingSupport.OUTER, self._getitem
-    )
 
-  def _getitem(self, key):
-    return WrappedTensorStore(self.array[key])
+class ImmediateTensorStore(ExplicitlyIndexedNDArrayMixin):
+  __slots__ = ("array",)
+
+  array: ts.TensorStore
+
+  def __init__(self, array):
+    self.array = array
+
+  @property
+  def dtype(self) -> npt.DTypeLike:
+    return self.array.dtype.numpy_dtype
+
+  def get_duck_array(self):
+    return self.array.read().result()
+
+  async def async_get_duck_array(self):
+    return self.array.read().result()
+
+  def _oindex_get(self, indexer):
+    return self.array.oindex[indexer.tuple].read().result()
+
+  def _vindex_get(self, indexer):
+    return self.array.vindex[indexer.tuple].read().result()
+
+  def __getitem__(self, key):
+    return self.array[key.tuple].read().result()
+
+
+class ImmediateTensorBackendArray(ImmediateTensorStore, BackendArray):
+  def __init__(self, array):
+    super().__init__(array)
 
 
 def test_tensorstore_backend_array(register_meerkat_chunkmanager, ramp_data):
-  """Tests"""
-  A = TensorstoreBackendArray(ts.array(ramp_data))
+  A = DelayedTensorStoreBackendArray(ts.array(ramp_data))
   M = MeerkatArray(A, (2, 3))
   L = LazilyIndexedArray(A)
   V = L[BasicIndexer((slice(1, 3), slice(2, 4)))]
-  assert isinstance(V.get_duck_array(), ts.TensorStore)
+  assert isinstance(V.get_duck_array(), DelayedTensorStore)
 
   ds = xarray.Dataset({"M": (("x", "y"), M)})
   key = {"x": slice(1, 3), "y": [1, 4]}
@@ -241,16 +273,36 @@ class DummyBackendEntryPoint(BackendEntrypoint):
   description = "Dummy Testing Backend"
   supports_groups = True
 
+  @staticmethod
+  def infer_api_chunking(
+    frame: FrameType | None, depth: int = 10
+  ) -> Tuple[Dict[str, int] | None, str | None]:
+    chunks = None
+    array_type = None
+
+    while frame and depth > 0 and chunks is None and array_type is None:
+      if frame.f_code in {open_groups.__code__, open_datatree.__code__}:
+        chunks = chunks or frame.f_locals.get("chunks")
+        array_type = array_type or frame.f_locals.get("chunked_array_type")
+
+      depth -= 1
+      frame = frame.f_back
+
+    return chunks, array_type
+
   def open_datatree(self, filename_or_obj, *, drop_variables=None):
     return xarray.DataTree.from_dict(
       self.open_groups_as_dict(filename_or_obj, drop_variables=drop_variables)
     )
 
   def open_groups_as_dict(self, filename_or_obj, *, drop_variables=None):
-    def Array(a):
-      return TensorstoreBackendArray(ts.array(a))
-
     ramp = np.arange(np.prod(ALL)).astype(np.float32).reshape(ALL)
+    chunks, _ = self.infer_api_chunking(inspect.currentframe().f_back)
+
+    def Array(a):
+      if chunks is not None:
+        return DelayedTensorStoreBackendArray(ts.array(a))
+      return LazilyIndexedArray(ImmediateTensorBackendArray(ts.array(a)))
 
     ds = xarray.Dataset(
       {
@@ -278,13 +330,38 @@ def register_dummy_engine(monkeypatch):
   yield
 
 
+def test_tensorstore_arrays_open_datatree(register_dummy_engine):
+  """Test opening the datatree without chunking"""
+  dt = xarray.open_datatree("dont-care", engine="test-backend")
 
-@pytest.mark.parametrize("chunks", [
-  {},
-  {"time": 1, "frequency": 4},
-  {"time": 2, "baseline_id": 3, "frequency": 8}
-])
-def test_tensorstore_arrays_open_datatree(
+  def recurse_isinstance(data, types):
+    if isinstance(data, types):
+      return True
+
+    return recurse_isinstance(getattr(data, "array", None), types)
+
+  assert recurse_isinstance(dt["a"].WEIGHT.variable._data, ImmediateTensorBackendArray)
+  assert recurse_isinstance(
+    dt["a"].VISIBILITY.variable._data, ImmediateTensorBackendArray
+  )
+  assert recurse_isinstance(dt["b"].WEIGHT.variable._data, ImmediateTensorBackendArray)
+  assert recurse_isinstance(
+    dt["b"].VISIBILITY.variable._data, ImmediateTensorBackendArray
+  )
+
+  dt.load()
+
+  assert recurse_isinstance(dt["a"].WEIGHT.variable._data, np.ndarray)
+  assert recurse_isinstance(dt["a"].VISIBILITY.variable._data, np.ndarray)
+  assert recurse_isinstance(dt["b"].WEIGHT.variable._data, np.ndarray)
+  assert recurse_isinstance(dt["b"].VISIBILITY.variable._data, np.ndarray)
+
+
+@pytest.mark.parametrize(
+  "chunks",
+  [{}, {"time": 1, "frequency": 4}, {"time": 2, "baseline_id": 3, "frequency": 8}],
+)
+def test_tensorstore_arrays_open_datatree_meerkat_chunks(
   register_meerkat_chunkmanager, register_dummy_engine, chunks
 ):
   """Tests that opening tensorstore backend arrays with the MeerKatArray
@@ -295,8 +372,7 @@ def test_tensorstore_arrays_open_datatree(
 
   flag = dt["a"].FLAG
   expected_chunks = normalize_chunks(
-    tuple(chunks.get(d, c) for (d, c) in zip(flag.dims, flag.chunks)),
-    flag.shape
+    tuple(chunks.get(d, c) for (d, c) in zip(flag.dims, flag.chunks)), flag.shape
   )
 
   shape = dt["a"].FLAG.shape
@@ -327,8 +403,58 @@ def test_tensorstore_arrays_open_datatree(
   assert_array_equal(dt["b"].VISIBILITY, sel_ramp + sel_ramp * 1j)
 
 
-def test_tensorstore_wrapped_array(register_meerkat_chunkmanager, ramp_data):
-  A = WrappedTensorStore(ts.array(ramp_data))
+@pytest.mark.parametrize(
+  "chunks",
+  [{}, {"time": 1, "frequency": 4}, {"time": 2, "baseline_id": 3, "frequency": 8}],
+)
+def test_tensorstore_arrays_open_datatree_dask_chunks(
+  register_meerkat_chunkmanager, register_dummy_engine, chunks
+):
+  """Tests that opening tensorstore backend arrays with the MeerKatArray
+  Chunked Array type works"""
+  da = pytest.importorskip("dask.array")
+  dt = xarray.open_datatree(
+    "s3://remote-url-to-mollify-mtime",
+    engine="test-backend",
+    chunked_array_type="dask",
+    chunks=chunks,
+  )
+
+  flag = dt["a"].FLAG
+  expected_chunks = normalize_chunks(
+    tuple(chunks.get(d, c) for (d, c) in zip(flag.dims, flag.chunks)), flag.shape
+  )
+
+  shape = dt["a"].FLAG.shape
+  ramp = np.arange(np.prod(shape)).reshape(shape).astype(np.float32)
+  key = {"time": slice(2, 4), "baseline_id": [1, 3, 4], "frequency": slice(4, 12)}
+  assert isinstance(dt["a"].WEIGHT.data, da.Array)
+  assert isinstance(dt["a"].VISIBILITY.data, da.Array)
+  assert dt["a"].WEIGHT.data.chunks == expected_chunks
+  assert dt["a"].VISIBILITY.data.chunks == expected_chunks
+  assert isinstance(dt["b"].WEIGHT.data, da.Array)
+  assert isinstance(dt["b"].VISIBILITY.data, da.Array)
+  assert dt["b"].WEIGHT.data.chunks == expected_chunks
+  assert dt["b"].VISIBILITY.data.chunks == expected_chunks
+
+  dt = dt.isel(**key)
+  dt.load()
+
+  sel_ramp = ramp[tuple(key.values())]
+
+  assert isinstance(dt["a"].WEIGHT.data, np.ndarray)
+  assert isinstance(dt["a"].VISIBILITY.data, np.ndarray)
+  assert isinstance(dt["b"].WEIGHT.data, np.ndarray)
+  assert isinstance(dt["b"].VISIBILITY.data, np.ndarray)
+
+  assert_array_equal(dt["a"].WEIGHT, sel_ramp)
+  assert_array_equal(dt["a"].VISIBILITY, sel_ramp + sel_ramp * 1j)
+  assert_array_equal(dt["b"].WEIGHT, sel_ramp)
+  assert_array_equal(dt["b"].VISIBILITY, sel_ramp + sel_ramp * 1j)
+
+
+def test_tensorstore_delayed_array(register_meerkat_chunkmanager, ramp_data):
+  A = DelayedTensorStore(ts.array(ramp_data))
   assert A.dtype == np.complex64
   assert A.shape == (4, 5)
   key = (slice(1, 3), slice(2, 4))
