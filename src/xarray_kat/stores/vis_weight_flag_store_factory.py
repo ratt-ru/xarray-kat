@@ -81,23 +81,21 @@ class VisWeightFlagFactory:
   def get_context(self, spec: Dict[str, Any]) -> ts.Context:
     return ts.Context(spec=ts.Context.Spec(spec))
 
-  def http_store(self, data_type: str) -> Multiton[ts.TensorStore]:
+  def http_store(self, array_meta: ArchiveArrayMetadata) -> Multiton[ts.TensorStore]:
     """Create an http kvstore with a path of the form
     ``1234567890_sdp_l0/correlator_data/``"""
-    chunk_info = self._data_products.instance.telstate["chunk_info"]
-    prefix = chunk_info[data_type]["prefix"]
-    path = f"{prefix}/{data_type}/"
+    path = f"{array_meta.prefix}/{array_meta.name}/"
     return Multiton(http_store_factory, self._endpoint, path, self._token, None)
 
-  def http_backed_store(self, data_type: str) -> Multiton[ts.TensorStore]:
+  def http_backed_store(
+    self, array_meta: ArchiveArrayMetadata
+  ) -> Multiton[ts.TensorStore]:
     """Create a virtual chunked tensorstore backed by an http kvstore
     that retrieves data from the MeerKAT archive"""
     return Multiton(
       base_virtual_store,
-      self.http_store(data_type),
-      self._data_products.instance.telstate["chunk_info"][data_type],
-      DATA_TYPE_LABELS[data_type],
-      MISSING_VALUES[data_type],
+      self.http_store(array_meta),
+      array_meta,
       self.get_context({"cache_pool": {"total_bytes_limit": CACHE_SIZE}}),
     )
 
@@ -108,7 +106,12 @@ class VisWeightFlagFactory:
     chunk_info = telstate["chunk_info"]
     array_meta = {
       dt: ArchiveArrayMetadata(
-        dt, MISSING_VALUES[dt], DATA_TYPE_LABELS[dt], schema["chunks"], schema["dtype"]
+        dt,
+        MISSING_VALUES[dt],
+        DATA_TYPE_LABELS[dt],
+        schema["prefix"],
+        schema["chunks"],
+        schema["dtype"],
       )
       for dt, schema in chunk_info.items()
     }
@@ -149,7 +152,7 @@ class VisWeightFlagFactory:
     # Create the base visibility store
     base_vis = Multiton(
       base_visibility_virtual_store,
-      self.http_store("correlator_data"),
+      self.http_store(array_meta["correlator_data"]),
       array_meta["correlator_data"],
       self._autocorrs,
       self._van_vleck,
@@ -157,8 +160,8 @@ class VisWeightFlagFactory:
     )
 
     # Create the base integer and channel weights stores
-    base_int_weights = self.http_backed_store("weights")
-    base_chan_weights = self.http_backed_store("weights_channel")
+    base_int_weights = self.http_backed_store(array_meta["weights"])
+    base_chan_weights = self.http_backed_store(array_meta["weights_channel"])
 
     # Possibly create a calibration solutions store
     # if applycal is configure
@@ -209,7 +212,7 @@ class VisWeightFlagFactory:
     # Create the top level flag store
     self._flag = Multiton(
       final_flag_store,
-      self.http_backed_store("flags"),
+      self.http_backed_store(array_meta["flags"]),
       calibration_solutions,
       final_metadata.copy(dtype=array_meta["flags"].dtype),
       top_level_thread_ctx,

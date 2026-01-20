@@ -15,6 +15,7 @@ class ArchiveArrayMetadata:
   name: str
   default: Any
   dim_labels: Tuple[str, ...]
+  prefix: str
   # Variables used to intialise the object, but
   # not stored on the object itself
   dask_chunks: InitVar[Tuple[Tuple[int, ...], ...]]
