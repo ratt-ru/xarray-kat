@@ -14,7 +14,11 @@ import tensorstore as ts
 import xarray
 from xarray.core.indexing import LazilyIndexedArray
 
-from xarray_kat.array import AbstractMeerkatArchiveArray, CorrProductArray
+from xarray_kat.array import (
+  AbstractMeerkatArchiveArray,
+  DelayedCorrProductArray,
+  ImmediateCorrProductArray,
+)
 from xarray_kat.katdal_types import corrprod_to_autocorr
 from xarray_kat.multiton import Multiton
 from xarray_kat.stores.vis_weight_flag_store_factory import VisWeightFlagFactory
@@ -80,6 +84,8 @@ def _index_store(store: Multiton[ts.TensorStore], index) -> ts.TensorStore:
 
 
 class DataTreeFactory:
+  _chunks: Dict[str, int] | None
+  _chunked_array_type: str | None
   _preferred_chunks: Dict[str, int]
   _data_products: Multiton[TelstateDataProducts]
   _scan_states: Set[str]
@@ -90,6 +96,8 @@ class DataTreeFactory:
 
   def __init__(
     self,
+    chunks: Dict[str, int] | None,
+    chunked_array_type: str | None,
     preferred_chunks: Dict[str, int],
     data_products: Multiton[TelstateDataProducts],
     applycal: str | Iterable[str],
@@ -98,6 +106,8 @@ class DataTreeFactory:
     endpoint: str,
     token: str | None = None,
   ):
+    self._chunks = chunks
+    self._chunked_array_type = chunked_array_type
     self._preferred_chunks = preferred_chunks
     self._data_products = data_products
     self._applycal = applycal
@@ -132,6 +142,18 @@ class DataTreeFactory:
     return chunks
 
   def create(self) -> Dict[str, xarray.Dataset]:
+    if self._chunks is not None:
+      ArrayClass = DelayedCorrProductArray
+    else:
+      warnings.warn(
+        f"xarray.open_{{groups,datatree}} was invoked without "
+        f'the "chunks" argument. This should be specified, '
+        f'along with the "chunked_array_type" ({self._chunked_array_type}), '
+        f'which should be set to "xarray-kat" or "dask"',
+        UserWarning,
+      )
+      ArrayClass = ImmediateCorrProductArray
+
     telstate = self._data_products.instance.telstate
     chunk_info = telstate["chunk_info"]
 
@@ -220,15 +242,15 @@ class DataTreeFactory:
       if np.all(np.diff(mask_index := np.where(mask)[0]) == 1):
         mask_index = slice(mask_index[0], mask_index[-1] + 1)
 
-      vis_array = CorrProductArray(
+      vis_array = ArrayClass(
         Multiton(_index_store, corr_data_store, mask_index), cp_argsort, len(pols)
       )
 
-      weight_array = CorrProductArray(
+      weight_array = ArrayClass(
         Multiton(_index_store, weight_store, mask_index), cp_argsort, len(pols)
       )
 
-      flag_array = CorrProductArray(
+      flag_array = ArrayClass(
         Multiton(_index_store, flag_store, mask_index), cp_argsort, len(pols)
       )
 

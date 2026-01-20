@@ -17,6 +17,9 @@ dependencies = [
 [project.entry-points."xarray.backends"]
 "xarray-kat" = "xarray_kat.entrypoint:KatEntryPoint"
 
+[project.entry-points."xarray.chunkmanagers"]
+"xarray-kat" = "xarray_kat.meerkat_chunk_manager:MeerKatChunkManager"
+
 [project.optional-dependencies]
 testing = [
     "cloudpickle>=3.1.1",

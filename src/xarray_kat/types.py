@@ -36,7 +36,8 @@ class ArchiveArrayMetadata:
     self.dtype = np.dtype(dtype_str)
     if len(self.shape) != len(self.dim_labels):
       raise ValueError(
-        f"{self.name} shape {self.shape} does not match dimension labels {self.dim_labels}"
+        f"{self.name} shape {self.shape} does not "
+        f"match dimension labels {self.dim_labels}"
       )
 
   def copy(self, **kw):
