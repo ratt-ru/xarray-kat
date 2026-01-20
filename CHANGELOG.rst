@@ -3,6 +3,7 @@ Changelog
 
 X.Y.Z (DD-MM-YYY)
 -----------------
+* Implement a Chunked Storage Manager (:pr:`33`)
 * Support preferred chunking and ensure consistent chunking across visibilities, weights and flags  (:pr:`32`)
 * Expand ``KatEntryPoint.open_dataset_parameters`` to include missing arguments (:pr:`31`)
 * Apply calibration solutions (:pr:`30`)
