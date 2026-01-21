@@ -3,6 +3,7 @@ Changelog
 
 X.Y.Z (DD-MM-YYY)
 -----------------
+* Only wrap TensorStores with LazilyIndexArrays in the unchunked case (:pr:`35`)
 * Reset the origin of each TensorStore to zero for each partition/scan (:pr:`35`)
 * Use ArchiveArrayMetadata dataclass in http store construction (:pr:`34`)
 * Implement a Chunked Storage Manager (:pr:`33`)
