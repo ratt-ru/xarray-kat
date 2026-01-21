@@ -7,7 +7,6 @@ import tensorstore as ts
 
 from xarray_kat.multiton import Multiton
 from xarray_kat.stores.base_store import base_virtual_store
-from xarray_kat.stores.calibration import calibration_solutions_store
 from xarray_kat.stores.flag_store import final_flag_store
 from xarray_kat.stores.http_store import http_store_factory
 from xarray_kat.stores.visibility_stores import (
@@ -163,18 +162,6 @@ class VisWeightFlagFactory:
     base_int_weights = self.http_backed_store(array_meta["weights"])
     base_chan_weights = self.http_backed_store(array_meta["weights_channel"])
 
-    # Possibly create a calibration solutions store
-    # if applycal is configure
-    calibration_solutions: Multiton[ts.TensorStore] | None = None
-
-    if self._data_products.instance.calibration_params is not None:
-      calibration_solutions = Multiton(
-        calibration_solutions_store,
-        self._data_products,
-        ("time", "frequency", "corrprod"),
-        self.get_context({"cache_pool": {"total_bytes_limit": CACHE_SIZE}}),
-      )
-
     # Create a top level context for performing data copies
     top_level_thread_ctx = self.get_context(
       {"data_copy_concurrency": {"limit": mp.cpu_count()}}
@@ -191,8 +178,8 @@ class VisWeightFlagFactory:
     self._vis = Multiton(
       final_visibility_virtual_store,
       base_vis,
-      calibration_solutions,
       final_metadata,
+      self._data_products,
       top_level_thread_ctx,
     )
 
@@ -202,7 +189,7 @@ class VisWeightFlagFactory:
       base_int_weights,
       base_chan_weights,
       base_vis,
-      calibration_solutions,
+      self._data_products,
       self._autocorrs,
       final_metadata.copy(dtype=array_meta["weights_channel"].dtype),
       telstate.get("needs_weight_power_scale", False),
@@ -213,7 +200,7 @@ class VisWeightFlagFactory:
     self._flag = Multiton(
       final_flag_store,
       self.http_backed_store(array_meta["flags"]),
-      calibration_solutions,
+      self._data_products,
       final_metadata.copy(dtype=array_meta["flags"].dtype),
       top_level_thread_ctx,
     )
