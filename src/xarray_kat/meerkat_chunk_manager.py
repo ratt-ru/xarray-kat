@@ -20,7 +20,6 @@ from xarray.core.types import T_Chunks, T_DuckArray, T_NormalizedChunks
 from xarray.namedarray._typing import _Chunks
 from xarray.namedarray.parallelcompat import ChunkManagerEntrypoint
 
-from xarray_kat.array import DelayedTensorStore
 from xarray_kat.utils import normalize_chunks
 from xarray_kat.utils.chunk_selection import chunk_ranges
 
@@ -124,14 +123,16 @@ class ReadWriteWorkItem:
   """Encapsulates an assignment of data from a destination to a source,
   possibly as part of a batch"""
 
-  dest: Any
-  source: Any
-  batch: Any
+  dest: npt.NDArray
+  source: ts.TensorStore | npt.NDArray
+  batch: ts.Batch | None
 
   def __post_init__(self):
     # Issue any (batched) futures
-    if isinstance(self.source, DelayedTensorStore):
-      self.source = self.source.get_duck_array().read(batch=self.batch)
+    if isinstance(self.source, ts.TensorStore):
+      self.source = self.source.read(batch=self.batch)
+    elif not isinstance(self.source, np.ndarray):
+      warnings.warn(f"Unexpected array type {type(self.source)}", UserWarning)
 
   def execute(self):
     self.dest[:] = (
