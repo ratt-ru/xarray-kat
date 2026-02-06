@@ -205,14 +205,16 @@ class MeerKatChunkManager(ChunkManagerEntrypoint):
 
     # Pipeline retrieval of data
     pipeline: Deque[ReadWriteWorkItem] = deque()
-    MAX_IN_FLIGHT = 10
+    MAX_IN_FLIGHT = 100
 
-    # Iterate over groups of arrays with the same chunking
-    for chunks, index_and_array in same_chunks.items():
+    def maybe_do_pipeline_work():
       while len(pipeline) >= MAX_IN_FLIGHT:
         pipeline.popleft().execute()
 
+    # Iterate over groups of arrays with the same chunking
+    for chunks, index_and_array in same_chunks.items():
       if len(index_and_array) == 1:
+        maybe_do_pipeline_work()
         # If the group contains a single array, we choose not
         # to load data chunk-wise
         index, array = index_and_array[0]
@@ -225,6 +227,8 @@ class MeerKatChunkManager(ChunkManagerEntrypoint):
         indices, arrays = zip(*index_and_array)
 
         for dim_coord_pairs in product(*(pairwise(r) for r in ranges)):
+          maybe_do_pipeline_work()
+
           with ts.Batch() as b:
             key = tuple(slice(s, e) for s, e in dim_coord_pairs)
             for index, array in zip(indices, arrays):
