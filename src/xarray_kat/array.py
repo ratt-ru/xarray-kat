@@ -13,6 +13,7 @@ from xarray.core.indexing import (
   IndexingSupport,
   OuterIndexer,
   VectorizedIndexer,
+  expanded_indexer,
   explicit_indexing_adapter,
 )
 
@@ -34,6 +35,37 @@ class AbstractMeerkatArchiveArray(ABC, BackendArray):
   @abstractmethod
   def chunks(self) -> Tuple[int, ...]:
     raise NotImplementedError
+
+
+class DelayedTensorStore(ExplicitlyIndexedNDArrayMixin):
+  """A wrapper for TensorStores that only produces new
+  DelayedTensorStores when indexed"""
+
+  __slots__ = ("array",)
+
+  array: ts.TensorStore
+
+  def __init__(self, array):
+    self.array = array
+
+  @property
+  def dtype(self) -> npt.DTypeLike:
+    return self.array.dtype.numpy_dtype
+
+  def get_duck_array(self):
+    return self.array
+
+  async def async_get_duck_array(self):
+    return self.array
+
+  def _oindex_get(self, indexer: OuterIndexer):
+    return DelayedTensorStore(self.array.oindex[indexer.tuple])
+
+  def _vindex_get(self, indexer: VectorizedIndexer):
+    return DelayedTensorStore(self.array.vindex[indexer.tuple])
+
+  def __getitem__(self, key):
+    return DelayedTensorStore(self.array[key.tuple])
 
 
 class CorrProductMixin:
@@ -109,6 +141,10 @@ class CorrProductMixin:
   def shape(self) -> Tuple[int, ...]:
     return self._msv4_shape
 
+  @property
+  def ndim(self) -> int:
+    return len(self._msv4_shape)
+
   def _normalize_key_axis(
     self,
     key: Tuple[slice | npt.NDArray | Integral, ...],
@@ -132,6 +168,7 @@ class CorrProductMixin:
     dimensions into keys which operate on MeerKAT archive data with
     ``(time, frequency, corrprod)`` dimensions.
     """
+    msv4_key = expanded_indexer(msv4_key, self.ndim)
     assert isinstance(msv4_key, tuple) and len(msv4_key) == 4
     time_selection = msv4_key[0]
     bl_selection = self._normalize_key_axis(msv4_key, 1)
@@ -151,75 +188,6 @@ class CorrProductMixin:
     """Transpose (time, frequency, baseline_id, polarization) to
     (time, baseline_id, frequency, polarization)"""
     return (0, 2, 1, 3)
-
-
-class DelayedTensorStore(ExplicitlyIndexedNDArrayMixin):
-  """A wrapper for TensorStores that only produces new
-  DelayedTensorStores when indexed"""
-
-  __slots__ = ("array",)
-
-  array: ts.TensorStore
-
-  def __init__(self, array):
-    self.array = array
-
-  @property
-  def dtype(self) -> npt.DTypeLike:
-    return self.array.dtype.numpy_dtype
-
-  def get_duck_array(self):
-    return self.array
-
-  async def async_get_duck_array(self):
-    return self.array
-
-  def _oindex_get(self, indexer: OuterIndexer):
-    return DelayedTensorStore(self.array.oindex[indexer.tuple])
-
-  def _vindex_get(self, indexer: VectorizedIndexer):
-    return DelayedTensorStore(self.array.vindex[indexer.tuple])
-
-  def __getitem__(self, key):
-    return DelayedTensorStore(self.array[key.tuple])
-
-
-class DelayedTensorStoreBackendArray(DelayedTensorStore, BackendArray):
-  def __init__(self, array):
-    super().__init__(array)
-
-
-class ImmediateTensorStore(ExplicitlyIndexedNDArrayMixin):
-  __slots__ = ("array",)
-
-  array: ts.TensorStore
-
-  def __init__(self, array):
-    self.array = array
-
-  @property
-  def dtype(self) -> npt.DTypeLike:
-    return self.array.dtype.numpy_dtype
-
-  def get_duck_array(self):
-    return self.array.read().result()
-
-  async def async_get_duck_array(self):
-    return self.array.read().result()
-
-  def _oindex_get(self, indexer):
-    return self.array.oindex[indexer.tuple].read().result()
-
-  def _vindex_get(self, indexer):
-    return self.array.vindex[indexer.tuple].read().result()
-
-  def __getitem__(self, key):
-    return self.array[key.tuple].read().result()
-
-
-class ImmediateTensorBackendArray(ImmediateTensorStore, BackendArray):
-  def __init__(self, array):
-    super().__init__(array)
 
 
 class DelayedCorrProductArray(CorrProductMixin, AbstractMeerkatArchiveArray):
@@ -271,3 +239,70 @@ class ImmediateCorrProductArray(DelayedCorrProductArray):
 
   def _getitem(self, key) -> npt.NDArray:
     return super()._getitem(key).get_duck_array().read().result()
+
+
+class DelayedBackendArray(
+  CorrProductMixin, ExplicitlyIndexedNDArrayMixin, AbstractMeerkatArchiveArray
+):
+  """Wraps a ``(time, frequency, corrprod)``` TensorStore.
+
+  Most data in the MeerKAT archive has dimension
+  ``(time, frequency, corrprod)``.
+  This class reshapes the underlying data into the
+  ``(time, baseline_id, frequency, polarization)`` form.
+  """
+
+  __slots__ = ("array",)
+
+  array: Multiton[ts.TensorStore]
+
+  def __init__(
+    self, store: Multiton[ts.Tensorstore], cp_argsort: npt.NDArray, npol: int
+  ):
+    super().__init__(
+      store.instance.shape,
+      store.instance.domain.labels,
+      store.instance.chunk_layout.read_chunk.shape,
+      cp_argsort,
+      npol,
+    )
+    self.array = store
+
+  @property
+  def dtype(self) -> npt.DTypeLike:
+    return self.array.instance.dtype.numpy_dtype
+
+  def get_duck_array(self):
+    return self.array.instance
+
+  async def async_get_duck_array(self):
+    return self.array.instance
+
+  def _oindex_get(self, indexer):
+    key = self.meerkat_key(indexer.tuple)
+    store = self.array.instance.oindex[key].transpose(self.transpose_axes)
+    return DelayedTensorStore(store)
+
+  def _vindex_get(self, indexer):
+    raise NotImplementedError("vindex")
+
+  def __getitem__(self, key):
+    mkey = self.meerkat_key(key.tuple)
+    store = self.array.instance[mkey].transpose(self.transpose_axes)
+    return DelayedTensorStore(store)
+
+
+class ImmediateBackendArray(DelayedBackendArray):
+  def __init__(
+    self, store: Multiton[ts.Tensorstore], cp_argsort: npt.NDArray, npol: int
+  ):
+    super().__init__(store, cp_argsort, npol)
+
+  def _oindex_get(self, indexer):
+    return super()._oindex_get(indexer).get_duck_array().read().result()
+
+  def _vindex_get(self, indexer):
+    return super()._vindex_get(indexer).get_duck_array().read().result()
+
+  def __getitem__(self, key):
+    return super().__getitem__(key).get_duck_array().read().result()

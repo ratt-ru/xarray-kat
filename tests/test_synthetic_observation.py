@@ -4,13 +4,11 @@ These tests verify that the mock data generation infrastructure works correctly
 and produces valid telstate and array data.
 """
 
-from pathlib import Path
-
 import numpy as np
 import pytest
 from katsdptelstate import TelescopeState
 
-from fixtures import SyntheticObservation, create_sensor_data, dict_to_rdb
+from tests.conftest import SyntheticObservation, create_sensor_data, dict_to_rdb
 
 
 class TestRDBGeneration:
@@ -138,6 +136,16 @@ class TestSyntheticObservation:
     assert obs.bls_ordering[2] == ["m000v", "m000h"]
     assert obs.bls_ordering[3] == ["m000v", "m000v"]
 
+    assert obs.bls_ordering[4 * 4 + 0] == ["m001h", "m002h"]  # Autocorr
+    assert obs.bls_ordering[4 * 4 + 1] == ["m001h", "m002v"]
+    assert obs.bls_ordering[4 * 4 + 2] == ["m001v", "m002h"]
+    assert obs.bls_ordering[4 * 4 + 3] == ["m001v", "m002v"]
+
+    assert obs.bls_ordering[5 * 4 + 0] == ["m002h", "m002h"]  # Autocorr
+    assert obs.bls_ordering[5 * 4 + 1] == ["m002h", "m002v"]
+    assert obs.bls_ordering[5 * 4 + 2] == ["m002v", "m002h"]
+    assert obs.bls_ordering[5 * 4 + 3] == ["m002v", "m002v"]
+
   def test_telstate_dict_structure(self):
     """Test telstate dictionary has required keys."""
     obs = SyntheticObservation(
@@ -190,9 +198,7 @@ class TestSyntheticObservation:
     obs = SyntheticObservation(capture_block_id="123", ntime=8, nfreq=16, nants=4)
 
     # Test correlator data
-    vis_data = obs.generate_array_data(
-      "correlator_data", np.complex64, (8, 16, 40)
-    )
+    vis_data = obs.generate_array_data("correlator_data", np.complex64, (8, 16, 40))
     assert vis_data.shape == (8, 16, 40)
     assert vis_data.dtype == np.complex64
 
@@ -210,9 +216,7 @@ class TestSyntheticObservation:
     assert np.all(weight_data == 200)
 
     # Test channel weights
-    chan_weight_data = obs.generate_array_data(
-      "weights_channel", np.float32, (8, 16)
-    )
+    chan_weight_data = obs.generate_array_data("weights_channel", np.float32, (8, 16))
     assert chan_weight_data.shape == (8, 16)
     assert chan_weight_data.dtype == np.float32
     assert np.all(chan_weight_data > 0.5)
@@ -265,9 +269,7 @@ class TestSyntheticObservation:
 
   def test_load_saved_chunks(self, tmp_path):
     """Test that saved chunks can be loaded and have correct data."""
-    obs = SyntheticObservation(
-      capture_block_id="1234567890", ntime=4, nfreq=8, nants=4
-    )
+    obs = SyntheticObservation(capture_block_id="1234567890", ntime=4, nfreq=8, nants=4)
     obs.save_to_directory(tmp_path)
 
     # Load a chunk and verify

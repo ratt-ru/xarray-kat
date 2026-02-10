@@ -26,6 +26,7 @@ testing = [
     "dask>=2025.9.1",
     "dill>=0.4.0",
     "pytest>=8.4.2",
+    "pytest-httpserver>=1.1.0",
 ]
 numba = [
     "numba>=0.62.1",
@@ -49,6 +50,10 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["F", "E", "W", "I001"]
 extend-select = ["I"]
+
+exclude = [
+    "src/xarray_kat/third_party/*",
+]
 
 
 [tool.tbump]
