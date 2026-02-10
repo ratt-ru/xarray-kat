@@ -3,6 +3,8 @@ Changelog
 
 X.Y.Z (DD-MM-YYY)
 -----------------
+* Setup github actions (:pr:`41`)
+* Fix quantity typo (:pr:`40`)
 * Update to tensorstore 0.1.81 to use Batches in ``virtual_chunked`` (:pr:`39`)
 * Add a mock HTTP archive for testing (:pr:`38`)
 * Fix handling of TensorStore in ReadWriteWorkItem (:pr:`36`)
