@@ -283,7 +283,7 @@ class DataTreeFactory:
         "scale": "utc",
         "format": "unix",
         "integration_time": {
-          "attrs": {"type": "quanitity", "units": "s"},
+          "attrs": {"type": "quantity", "units": "s"},
           "data": integration_time,
         },
       }
