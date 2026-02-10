@@ -10,7 +10,7 @@ requires-python = ">=3.11"
 dependencies = [
     "katpoint>=0.10.2",
     "katsdptelstate[rdb]>=1.0.0",
-    "tensorstore>=0.1.77",
+    "tensorstore>=0.1.81",
     "xarray>=2025.9.1",
 ]
 
