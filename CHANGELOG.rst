@@ -3,6 +3,7 @@ Changelog
 
 X.Y.Z (DD-MM-YYY)
 -----------------
+* Add a mock HTTP archive for testing (:pr:`38`)
 * Fix handling of TensorStore in ReadWriteWorkItem (:pr:`36`)
 * Only wrap TensorStores with LazilyIndexArrays in the unchunked case (:pr:`35`)
 * Reset the origin of each TensorStore to zero for each partition/scan (:pr:`35`)
