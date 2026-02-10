@@ -17,7 +17,7 @@ from xarray_kat.third_party.vendored.katdal.vis_flags_weights_minimal import (
 if TYPE_CHECKING:
   from xarray_kat.katdal_types import AutoCorrelationIndices, TelstateDataProducts
   from xarray_kat.multiton import Multiton
-  from xarray_kat.types import ArchiveArrayMetadata
+  from xarray_kat.xkat_types import ArchiveArrayMetadata
 
 def scaled_weight_store(
   int_weights_store: Multiton[ts.TensorStore],
@@ -33,7 +33,8 @@ def scaled_weight_store(
   by the visibility auto-correlations
 
   Args:
-    int_weights_store: uint8 weights TensorStore of shape ``(time, frequency, corrprod)``.
+    int_weights_store: uint8 weights TensorStore of shape
+      ``(time, frequency, corrprod)``.
     channel_weights_store: float32 weights TensorStore of shape ``(time, frequency)``.
     vis_store: complex visibility TensorStore of shape ``(time, frequency, corrprod)``.
     data_products: Telescope State Data Products

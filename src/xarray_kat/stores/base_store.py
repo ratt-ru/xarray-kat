@@ -9,7 +9,7 @@ import tensorstore as ts
 from numpy.lib.format import read_array_header_1_0, read_array_header_2_0, read_magic
 
 from xarray_kat.multiton import Multiton
-from xarray_kat.types import ArchiveArrayMetadata
+from xarray_kat.xkat_types import ArchiveArrayMetadata
 
 log = logging.getLogger(__name__)
 

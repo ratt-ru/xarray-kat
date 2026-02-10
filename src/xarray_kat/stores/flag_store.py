@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
   from xarray_kat.katdal_types import TelstateDataProducts
   from xarray_kat.multiton import Multiton
-  from xarray_kat.types import ArchiveArrayMetadata
+  from xarray_kat.xkat_types import ArchiveArrayMetadata
 
 
 def final_flag_store(

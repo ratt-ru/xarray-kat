@@ -15,7 +15,7 @@ from xarray_kat.third_party.vendored.katdal.applycal_minimal import (
   calc_correction_per_corrprod,
 )
 from xarray_kat.third_party.vendored.katdal.van_vleck import autocorr_lookup_table
-from xarray_kat.types import VanVleckLiteralType
+from xarray_kat.xkat_types import VanVleckLiteralType
 
 if TYPE_CHECKING:
   from xarray_kat.katdal_types import TelstateDataProducts
