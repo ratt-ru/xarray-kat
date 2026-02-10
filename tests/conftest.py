@@ -847,10 +847,24 @@ def setup_mock_archive_server(
   """
   valid_token = create_mock_jwt(capture_block_id) if require_auth else None
 
-  # Note: For now, we're not implementing auth checking since pytest-httpserver
-  # respond_with_data doesn't support conditional responses based on headers.
-  # Auth checking would require respond_with_handler which has API complexity.
-  # For testing purposes, having the token present in the URL is sufficient.
+  def _make_auth_handler(content, content_type="application/octet-stream"):
+    """Create a handler that checks JWT auth before serving content."""
+    from urllib.parse import parse_qs, urlparse
+
+    from werkzeug.wrappers import Response
+
+    def handler(request):
+      # Check Authorization header
+      auth_header = request.headers.get("Authorization", "")
+      if auth_header == f"Bearer {valid_token}":
+        return Response(content, status=200, content_type=content_type)
+      # Check token query parameter (used by xarray-kat for RDB fetches)
+      query_token = parse_qs(urlparse(request.url).query).get("token", [None])[0]
+      if query_token == valid_token:
+        return Response(content, status=200, content_type=content_type)
+      return Response("Unauthorized", status=401, content_type="text/plain")
+
+    return handler
 
   # Route 1: RDB file
   rdb_filename = f"{capture_block_id}_sdp_l0.full.rdb"
@@ -859,9 +873,14 @@ def setup_mock_archive_server(
   if rdb_path.exists():
     with open(rdb_path, "rb") as f:
       rdb_content = f.read()
-    httpserver.expect_request(
-      f"/{capture_block_id}/{rdb_filename}", method="GET"
-    ).respond_with_data(rdb_content, content_type="application/octet-stream")
+    if require_auth:
+      httpserver.expect_request(
+        f"/{capture_block_id}/{rdb_filename}", method="GET"
+      ).respond_with_handler(_make_auth_handler(rdb_content))
+    else:
+      httpserver.expect_request(
+        f"/{capture_block_id}/{rdb_filename}", method="GET"
+      ).respond_with_data(rdb_content, content_type="application/octet-stream")
 
   # Route 2: Array chunks
   # Pattern: /{prefix}/{array_name}/{chunk_filename}.npy
@@ -879,9 +898,14 @@ def setup_mock_archive_server(
         with open(npy_file, "rb") as f:
           chunk_content = f.read()
 
-        httpserver.expect_request(uri, method="GET").respond_with_data(
-          chunk_content, content_type="application/octet-stream"
-        )
+        if require_auth:
+          httpserver.expect_request(uri, method="GET").respond_with_handler(
+            _make_auth_handler(chunk_content)
+          )
+        else:
+          httpserver.expect_request(uri, method="GET").respond_with_data(
+            chunk_content, content_type="application/octet-stream"
+          )
 
   return valid_token
 
