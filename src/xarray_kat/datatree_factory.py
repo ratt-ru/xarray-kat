@@ -16,13 +16,13 @@ from xarray.core.indexing import LazilyIndexedArray
 
 from xarray_kat.array import (
   AbstractMeerkatArchiveArray,
-  DelayedCorrProductArray,
-  ImmediateCorrProductArray,
+  DelayedBackendArray,
+  ImmediateBackendArray,
 )
 from xarray_kat.katdal_types import corrprod_to_autocorr
 from xarray_kat.multiton import Multiton
 from xarray_kat.stores.vis_weight_flag_store_factory import VisWeightFlagFactory
-from xarray_kat.types import VanVleckLiteralType
+from xarray_kat.xkat_types import VanVleckLiteralType
 
 if TYPE_CHECKING:
   from xarray_kat.katdal_types import TelstateDataProducts
@@ -145,7 +145,7 @@ class DataTreeFactory:
 
   def create(self) -> Dict[str, xarray.Dataset]:
     if self._chunks is not None:
-      ArrayClass = DelayedCorrProductArray
+      ArrayClass = DelayedBackendArray
 
       def WrappedArray(a):
         return a
@@ -157,7 +157,7 @@ class DataTreeFactory:
         f'which should be set to "xarray-kat" or "dask"',
         UserWarning,
       )
-      ArrayClass = ImmediateCorrProductArray
+      ArrayClass = ImmediateBackendArray
 
       def WrappedArray(a):
         return LazilyIndexedArray(a)
@@ -307,6 +307,7 @@ class DataTreeFactory:
       }
 
       scan_timestamps = timestamps[mask_index]
+      description = f"Scan {scan_index} {STATE_PARTICIPLE_MAP[state]} {target.name}"
 
       ds = xarray.Dataset(
         data_vars=data_vars,
@@ -328,7 +329,7 @@ class DataTreeFactory:
             "software_name": "xarray-kat",
             "version": importlib_version("xarray-kat"),
           },
-          "description": f"Scan {scan_index} {STATE_PARTICIPLE_MAP[state]} {target.name}",
+          "description": description,
           "observation_info": {
             "observer": observer,
             "project_uid": experiment_id,

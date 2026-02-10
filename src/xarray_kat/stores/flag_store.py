@@ -12,7 +12,7 @@ if TYPE_CHECKING:
   import numpy as np
 
   from xarray_kat.multiton import Multiton
-  from xarray_kat.types import ArchiveArrayMetadata
+  from xarray_kat.xkat_types import ArchiveArrayMetadata
 
 
 def final_flag_store(

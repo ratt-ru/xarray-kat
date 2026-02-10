@@ -15,7 +15,7 @@ from xarray_kat.stores.visibility_stores import (
   final_visibility_virtual_store,
 )
 from xarray_kat.stores.weight_store import scaled_weight_store
-from xarray_kat.types import ArchiveArrayMetadata, VanVleckLiteralType
+from xarray_kat.xkat_types import ArchiveArrayMetadata, VanVleckLiteralType
 
 if TYPE_CHECKING:
   from katsdptelstate.telescope_state import TelescopeState

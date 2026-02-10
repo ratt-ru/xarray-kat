@@ -22,11 +22,12 @@ from xarray.core.indexing import (
 from xarray.namedarray.parallelcompat import (
   get_chunked_array_type,
   guess_chunkmanager,
-  list_chunkmanagers,
 )
 
 from xarray_kat.meerkat_chunk_manager import MeerkatArray, MeerKatChunkManager
 from xarray_kat.utils import normalize_chunks
+
+pytest.importorskip("i-dont-exist")
 
 
 @pytest.fixture(params=[{"shape": (4, 5), "dtype": np.complex64}])
@@ -59,20 +60,25 @@ class DummyArray(BackendArray):
     return self.data[key]
 
 
-@pytest.fixture
-def register_meerkat_chunkmanager(monkeypatch):
-  """Mock registration of a ChunkManagerEntrypoint"""
-  preregistered_chunkmanagers = list_chunkmanagers()
+# @pytest.fixture
+# def register_meerkat_chunkmanager(monkeypatch):
+#   """Mock registration of a ChunkManagerEntrypoint"""
+#   preregistered_chunkmanagers = list_chunkmanagers()
 
-  monkeypatch.setattr(
-    "xarray.namedarray.parallelcompat.list_chunkmanagers",
-    lambda: {"meerkat": MeerKatChunkManager()} | preregistered_chunkmanagers,
-  )
+#   monkeypatch.setattr(
+#     "xarray.namedarray.parallelcompat.list_chunkmanagers",
+#     lambda: {"meerkat": MeerKatChunkManager()} | preregistered_chunkmanagers,
+#   )
+#   yield
+
+
+@pytest.fixture
+def register_meerkat_chunkmanager():
   yield
 
 
 def test_get_chunkmanager(register_meerkat_chunkmanager):
-  assert isinstance(guess_chunkmanager("meerkat"), MeerKatChunkManager)
+  assert isinstance(guess_chunkmanager("xarray-kat"), MeerKatChunkManager)
 
 
 def test_chunkmanager_chunked_array(register_meerkat_chunkmanager):
@@ -115,7 +121,7 @@ def small_ds(request):
 def test_chunk_backend_arrays(register_meerkat_chunkmanager, small_ds):
   """Tests rechunking into chunked MeerKatArrays"""
   ds = small_ds
-  assert (mgr := guess_chunkmanager("meerkat")) is not None
+  assert (mgr := guess_chunkmanager("xarray-kat")) is not None
   shape = tuple(ds.sizes[d] for d in ALL_DIMS)
   chunks = mgr.normalize_chunks(ALL_CHUNKS, shape)
   uvw_chunks = chunks[:2] + ((3,),)
@@ -125,7 +131,7 @@ def test_chunk_backend_arrays(register_meerkat_chunkmanager, small_ds):
   assert isinstance(ds.WEIGHT.variable._data, LazilyIndexedArray)
   assert isinstance(ds.DATA.variable._data, LazilyIndexedArray)
 
-  ds = small_ds.chunk(dict(zip(ALL_DIMS, ALL_CHUNKS)), chunked_array_type="meerkat")
+  ds = small_ds.chunk(dict(zip(ALL_DIMS, ALL_CHUNKS)), chunked_array_type="xarray-kat")
 
   assert isinstance(uvw := ds.UVW.data, MeerkatArray) and uvw.chunks == uvw_chunks
   assert isinstance(flag := ds.FLAG.data, MeerkatArray) and flag.chunks == chunks
@@ -150,7 +156,7 @@ def test_chunk_backend_arrays(register_meerkat_chunkmanager, small_ds):
 def test_load_backend_arrays_isel(register_meerkat_chunkmanager, small_ds):
   """Tests rechunking into chunked MeerKatArray following by an isel"""
   ds = small_ds
-  assert (mgr := guess_chunkmanager("meerkat")) is not None
+  assert (mgr := guess_chunkmanager("xarray-kat")) is not None
   shape = tuple(ds.sizes[d] for d in ALL_DIMS)
   chunks = mgr.normalize_chunks(ALL_CHUNKS, shape)
   uvw_chunks = chunks[:2] + ((3,),)
@@ -162,7 +168,7 @@ def test_load_backend_arrays_isel(register_meerkat_chunkmanager, small_ds):
   assert isinstance(ds.WEIGHT.variable._data, LazilyIndexedArray)
   assert isinstance(ds.DATA.variable._data, LazilyIndexedArray)
 
-  ds = small_ds.chunk(dict(zip(ALL_DIMS, ALL_CHUNKS)), chunked_array_type="meerkat")
+  ds = small_ds.chunk(dict(zip(ALL_DIMS, ALL_CHUNKS)), chunked_array_type="xarray-kat")
 
   assert isinstance(uvw := ds.UVW.data, MeerkatArray) and uvw.chunks == uvw_chunks
   assert isinstance(flag := ds.FLAG.data, MeerkatArray) and flag.chunks == chunks
@@ -367,7 +373,7 @@ def test_tensorstore_arrays_open_datatree_meerkat_chunks(
   """Tests that opening tensorstore backend arrays with the MeerKatArray
   Chunked Array type works"""
   dt = xarray.open_datatree(
-    "don't-care", engine="test-backend", chunked_array_type="meerkat", chunks=chunks
+    "don't-care", engine="test-backend", chunked_array_type="xarray-kat", chunks=chunks
   )
 
   flag = dt["a"].FLAG

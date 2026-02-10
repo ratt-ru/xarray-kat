@@ -11,10 +11,10 @@ from xarray_kat.multiton import Multiton
 from xarray_kat.stores.base_store import read_array
 from xarray_kat.third_party.vendored.katdal.applycal_minimal import apply_vis_correction
 from xarray_kat.third_party.vendored.katdal.van_vleck import autocorr_lookup_table
-from xarray_kat.types import VanVleckLiteralType
+from xarray_kat.xkat_types import VanVleckLiteralType
 
 if TYPE_CHECKING:
-  from xarray_kat.types import ArchiveArrayMetadata
+  from xarray_kat.xkat_types import ArchiveArrayMetadata
 
 log = logging.getLogger(__name__)
 
