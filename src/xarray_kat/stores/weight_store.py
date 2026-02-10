@@ -19,7 +19,6 @@ if TYPE_CHECKING:
   from xarray_kat.multiton import Multiton
   from xarray_kat.types import ArchiveArrayMetadata
 
-
 def scaled_weight_store(
   int_weights_store: Multiton[ts.TensorStore],
   channel_weights_store: Multiton[ts.TensorStore],
@@ -58,9 +57,9 @@ def scaled_weight_store(
     iws = ts.cast(int_weights_store.instance, cws.dtype)
 
     # Issue reads to the underlying stores
-    (int_weights_future := iws[domain].read()).force()
-    (channel_weights_future := cws[domain[:-1]].read()).force()
-    (vis_future := vis_store.instance[domain].read()).force()
+    (int_weights_future := iws[domain].read(batch=params.batch)).force()
+    (channel_weights_future := cws[domain[:-1]].read(batch=params.batch)).force()
+    (vis_future := vis_store.instance[domain].read(batch=params.batch)).force()
 
     # Prepare calibration solutions while waiting for data
     cal_solutions: npt.NDArray | None = None

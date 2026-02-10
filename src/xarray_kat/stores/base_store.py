@@ -83,7 +83,7 @@ def base_virtual_store(
     log.debug("%d Read %s into domain %s", key, domain)
     data = None
 
-    if (result := http_store.instance.read(key).result()).state == "value" and (
+    if (result := http_store.instance.read(key, batch=params.batch).result()).state == "value" and (
       data := read_array(result.value)
     ) is not None:
       log.debug("Read %s into domain %s", key, domain)
@@ -97,7 +97,6 @@ def base_virtual_store(
     assert array.shape == data.shape
     chunk_domain = domain.translate_backward_by[domain.origin]
     array[...] = data[chunk_domain.index_exp]
-    return result.stamp
 
   return ts.virtual_chunked(
     read_function=read_chunk,

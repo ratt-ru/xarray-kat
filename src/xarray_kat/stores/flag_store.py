@@ -32,7 +32,7 @@ def final_flag_store(
     domain: ts.IndexDomain, array: np.ndarray, params: ts.VirtualChunkedReadParameters
   ) -> ts.KvStore.TimestampedStorageGeneration:
     # Issue flag read future
-    (flags_future := base_flag_store.instance[domain].read()).force()
+    (flags_future := base_flag_store.instance[domain].read(batch=params.batch)).force()
 
     # Prepare calibration solutions while waiting for data
     cal_solutions: npt.NDArray | None = None

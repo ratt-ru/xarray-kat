@@ -66,7 +66,7 @@ def base_visibility_virtual_store(
     log.debug("%d Read %s into domain %s", key, domain)
     data = None
 
-    if (result := http_store.instance.read(key).result()).state == "value" and (
+    if (result := http_store.instance.read(key, batch=params.batch).result()).state == "value" and (
       data := read_array(result.value)
     ) is not None:
       log.debug("Read %s into domain %s", key, domain)
@@ -91,8 +91,6 @@ def base_visibility_virtual_store(
       )
     elif van_vleck != "off":
       raise ValueError(f"Invalid van_vleck value {van_vleck}")
-
-    return result.stamp
 
   return ts.virtual_chunked(
     read_function=read_chunk,
@@ -122,7 +120,7 @@ def final_visibility_virtual_store(
     domain: ts.IndexDomain, array: np.ndarray, params: ts.VirtualChunkedReadParameters
   ) -> ts.KvStore.TimestampedStorageGeneration:
     # Issue visibility data future
-    (vis_future := base_vis_store.instance[domain].read()).force()
+    (vis_future := base_vis_store.instance[domain].read(batch=params.batch)).force()
 
     # Prepare calibration solutions while waiting for visibilities
     cal_solutions: npt.NDArray | None = None
