@@ -19,6 +19,7 @@ if TYPE_CHECKING:
   from xarray_kat.multiton import Multiton
   from xarray_kat.xkat_types import ArchiveArrayMetadata
 
+
 def scaled_weight_store(
   int_weights_store: Multiton[ts.TensorStore],
   channel_weights_store: Multiton[ts.TensorStore],
