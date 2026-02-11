@@ -63,7 +63,6 @@ def base_visibility_virtual_store(
     """
     key_parts = [f"{o:05}" for o in domain.origin]
     key = f"{'_'.join(key_parts)}.npy"
-    log.debug("%d Read %s into domain %s", key, domain)
     data = None
 
     if (
