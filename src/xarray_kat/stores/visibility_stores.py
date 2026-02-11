@@ -66,9 +66,9 @@ def base_visibility_virtual_store(
     log.debug("%d Read %s into domain %s", key, domain)
     data = None
 
-    if (result := http_store.instance.read(key, batch=params.batch).result()).state == "value" and (
-      data := read_array(result.value)
-    ) is not None:
+    if (
+      result := http_store.instance.read(key, batch=params.batch).result()
+    ).state == "value" and (data := read_array(result.value)) is not None:
       log.debug("Read %s into domain %s", key, domain)
 
     # Fill with defaults if retrieval failed
@@ -78,8 +78,7 @@ def base_visibility_virtual_store(
       data = array
     else:
       assert array.shape == data.shape
-      chunk_domain = domain.translate_backward_by[domain.origin]
-      array[...] = data[chunk_domain.index_exp]
+      array[...] = data
 
     # Apply van vleck corrections
     if van_vleck == "autocorr":
