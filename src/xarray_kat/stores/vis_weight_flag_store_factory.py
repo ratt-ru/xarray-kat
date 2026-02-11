@@ -158,9 +158,10 @@ class VisWeightFlagFactory:
       self.get_context({"cache_pool": {"total_bytes_limit": CACHE_SIZE}}),
     )
 
-    # Create the base integer and channel weights stores
+    # Create the base integer weights, channel weights and flag stores
     base_int_weights = self.http_backed_store(array_meta["weights"])
     base_chan_weights = self.http_backed_store(array_meta["weights_channel"])
+    base_flags = self.http_backed_store(array_meta["flags"])
 
     # Create a top level context for performing data copies
     top_level_thread_ctx = self.get_context(
@@ -172,7 +173,7 @@ class VisWeightFlagFactory:
     # the visibilities. This ensures consistent
     # chunking along dimensions for the xarray layer.
     # The weight and flag stores use different dtypes
-    final_metadata = array_meta["correlator_data"]
+    final_metadata = array_meta["correlator_data"].copy()
 
     # Create the top level visibility store
     self._vis = Multiton(
@@ -199,7 +200,7 @@ class VisWeightFlagFactory:
     # Create the top level flag store
     self._flag = Multiton(
       final_flag_store,
-      self.http_backed_store(array_meta["flags"]),
+      base_flags,
       self._data_products,
       final_metadata.copy(dtype=array_meta["flags"].dtype),
       top_level_thread_ctx,
