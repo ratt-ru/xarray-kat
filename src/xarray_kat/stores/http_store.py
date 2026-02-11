@@ -1,5 +1,5 @@
 import logging
-from typing import Collection, Dict
+from typing import Any, Collection, Dict
 
 import tensorstore as ts
 
@@ -20,14 +20,16 @@ def http_spec(
   Returns:
     Tensorstore kvstore specification
   """
-  spec: Dict[str, Collection[str]] = {
+  spec: Dict[str, Any] = {
     "driver": "http",
     "base_url": endpoint,
     "path": path,
+    # Don't encrypt data
+    "headers": ["Accept-Encoding: identity"],
   }
 
   if token:
-    spec["headers"] = [f"Authorization: Bearer {token}"]
+    spec["headers"].append(f"Authorization: Bearer {token}")
 
   return spec
 
