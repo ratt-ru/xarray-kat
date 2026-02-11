@@ -3,6 +3,8 @@ Changelog
 
 X.Y.Z (DD-MM-YYY)
 -----------------
+* Pass batches through ``virtual_chunked`` stores to HTTP KVStores (:pr:`37`)
+* Move generation of calibration solutions to top level tensorstores  (:pr:`37`)
 * Setup github actions (:pr:`41`)
 * Fix quantity typo (:pr:`40`)
 * Update to tensorstore 0.1.81 to use Batches in ``virtual_chunked`` (:pr:`39`)
