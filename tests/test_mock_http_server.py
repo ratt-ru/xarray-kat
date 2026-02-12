@@ -22,6 +22,17 @@ from tests.conftest import (
 from xarray_kat.meerkat_chunk_manager import MeerkatArray
 
 
+def assert_visibilities_allclose(a, b):
+  """Helper assert function that exists to
+  signal that comparison of visibilities should
+  be treated with care. This is because
+  xarray-kat applies van-vleck corrections
+  and weight scaling transforms that subtly modify
+  the archival data"""
+  # For testing purposes, an allclose appears sufficient
+  return np.testing.assert_allclose(a, b)
+
+
 class TestMockJWT:
   """Test JWT token generation for mock server."""
 
@@ -170,7 +181,7 @@ class TestXarrayKatIntegration:
     expected = obs.generate_msv4_array_data(
       "correlator_data", ds.VISIBILITY.dtype, (obs.ntime, obs.nfreq, obs.ncorrprod)
     )
-    np.testing.assert_allclose(expected, ds.VISIBILITY.data)
+    assert_visibilities_allclose(expected, ds.VISIBILITY.data)
 
   def test_open_datatree_with_meerkat_chunks(self, httpserver: HTTPServer, tmp_path):
     """Test opening datatree with MeerKat chunk manager."""
@@ -205,7 +216,7 @@ class TestXarrayKatIntegration:
     expected = obs.generate_msv4_array_data(
       "correlator_data", ds.VISIBILITY.dtype, (obs.ntime, obs.nfreq, obs.ncorrprod)
     )
-    np.testing.assert_allclose(expected, ds.VISIBILITY.data)
+    assert_visibilities_allclose(expected, ds.VISIBILITY.data)
 
   def test_open_datatree_with_dask_chunks(self, httpserver: HTTPServer, tmp_path):
     """Test opening datatree with dask chunking."""
@@ -246,7 +257,7 @@ class TestXarrayKatIntegration:
     expected = obs.generate_msv4_array_data(
       "correlator_data", ds.VISIBILITY.dtype, (obs.ntime, obs.nfreq, obs.ncorrprod)
     )
-    np.testing.assert_allclose(expected, ds.VISIBILITY.data)
+    assert_visibilities_allclose(expected, ds.VISIBILITY.data)
 
   def test_data_selection_with_meerkat_chunks_isel(
     self, httpserver: HTTPServer, tmp_path
@@ -305,7 +316,7 @@ class TestXarrayKatIntegration:
     expected = obs.generate_msv4_array_data(
       "correlator_data", ds.VISIBILITY.dtype, (obs.ntime, obs.nfreq, obs.ncorrprod)
     )
-    np.testing.assert_allclose(expected[key], ds_subset.VISIBILITY.data)
+    assert_visibilities_allclose(expected[key], ds_subset.VISIBILITY.data)
 
   def test_multiple_scans(self, httpserver: HTTPServer, tmp_path):
     """Test observation with multiple scans."""
@@ -343,7 +354,7 @@ class TestXarrayKatIntegration:
 
       # Check that this scan matches the relevant portion of the test data
       ntime = ds.sizes["time"]
-      np.testing.assert_allclose(
+      assert_visibilities_allclose(
         ds.VISIBILITY.data, expected[time_index : time_index + ntime]
       )
       time_index += ntime
