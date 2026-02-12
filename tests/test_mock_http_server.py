@@ -7,6 +7,7 @@ actual MeerKAT archive.
 
 import urllib
 import urllib.request
+from typing import TypedDict
 
 import numpy as np
 import pytest
@@ -163,7 +164,13 @@ class TestXarrayKatIntegration:
 
     # Verify data was loaded
     assert isinstance(ds.VISIBILITY.data, np.ndarray)
-    assert ds.VISIBILITY.shape == (8, 10, 16, 4)  # (time, baseline, freq, pol)
+    assert ds.VISIBILITY.shape == (obs.ntime, obs.nbl, obs.nfreq, obs.npol)
+
+    # Verify data is correct
+    expected = obs.generate_msv4_array_data(
+      "correlator_data", ds.VISIBILITY.dtype, (obs.ntime, obs.nfreq, obs.ncorrprod)
+    )
+    np.testing.assert_allclose(expected, ds.VISIBILITY.data)
 
   def test_open_datatree_with_meerkat_chunks(self, httpserver: HTTPServer, tmp_path):
     """Test opening datatree with MeerKat chunk manager."""
@@ -193,6 +200,12 @@ class TestXarrayKatIntegration:
 
     # After compute, should be numpy arrays
     assert isinstance(ds.VISIBILITY.data, np.ndarray)
+
+    # Verify data is correct
+    expected = obs.generate_msv4_array_data(
+      "correlator_data", ds.VISIBILITY.dtype, (obs.ntime, obs.nfreq, obs.ncorrprod)
+    )
+    np.testing.assert_allclose(expected, ds.VISIBILITY.data)
 
   def test_open_datatree_with_dask_chunks(self, httpserver: HTTPServer, tmp_path):
     """Test opening datatree with dask chunking."""
@@ -229,7 +242,15 @@ class TestXarrayKatIntegration:
     ds = ds.compute()
     assert isinstance(ds.VISIBILITY.data, np.ndarray)
 
-  def test_data_selection_with_isel(self, httpserver: HTTPServer, tmp_path):
+    # Verify data is correct
+    expected = obs.generate_msv4_array_data(
+      "correlator_data", ds.VISIBILITY.dtype, (obs.ntime, obs.nfreq, obs.ncorrprod)
+    )
+    np.testing.assert_allclose(expected, ds.VISIBILITY.data)
+
+  def test_data_selection_with_meerkat_chunks_isel(
+    self, httpserver: HTTPServer, tmp_path
+  ):
     """Test selecting subsets of data."""
     obs = SyntheticObservation("1234567890", ntime=10, nfreq=16, nants=4)
     obs.add_scan(range(0, 10), "track", "PKS1934")
@@ -253,7 +274,17 @@ class TestXarrayKatIntegration:
     assert isinstance(ds.VISIBILITY.data, MeerkatArray)
 
     # Select a subset
-    ds_subset = ds.isel(time=slice(2, 6), baseline_id=[0, 2, 5], frequency=slice(4, 12))
+    class Selection(TypedDict):
+      time: slice
+      baseline_id: list[int]
+      frequency: slice
+
+    sel: Selection = {
+      "time": slice(2, 6),
+      "baseline_id": [1, 3, 4],
+      "frequency": slice(4, 12),
+    }
+    ds_subset = ds.isel(**sel)
 
     # MeerKat arrays on the selected dataset
     assert isinstance(ds_subset.VISIBILITY.data, MeerkatArray)
@@ -263,11 +294,18 @@ class TestXarrayKatIntegration:
 
     # Check shapes
     assert ds_subset.VISIBILITY.shape == (
-      4,
-      3,
-      8,
-      4,
-    )  # (4 times, 3 baselines, 8 freqs, 4 pols)
+      len(range(*sel["time"].indices(1_000_000))),
+      len(sel["baseline_id"]),
+      len(range(*sel["frequency"].indices(1_000_000))),
+      obs.npol,
+    )
+
+    # Verify data is correct
+    key = (sel["time"], sel["baseline_id"], sel["frequency"], slice(None))
+    expected = obs.generate_msv4_array_data(
+      "correlator_data", ds.VISIBILITY.dtype, (obs.ntime, obs.nfreq, obs.ncorrprod)
+    )
+    np.testing.assert_allclose(expected[key], ds_subset.VISIBILITY.data)
 
   def test_multiple_scans(self, httpserver: HTTPServer, tmp_path):
     """Test observation with multiple scans."""
@@ -286,7 +324,15 @@ class TestXarrayKatIntegration:
     dt = xarray.open_datatree(rdb_url, engine="xarray-kat")
 
     # Should have multiple children (one per scan)
-    assert len(dt.children) >= 2
+    assert len(children := list(dt.children)) == len(obs.scan_configs)
+
+    # Get the expected test data ranging over all scans
+    time_index = 0
+    expected = obs.generate_msv4_array_data(
+      "correlator_data",
+      dt[children[0]].VISIBILITY.dtype,
+      (obs.ntime, obs.nfreq, obs.ncorrprod),
+    )
 
     # Each scan should have data
     for scan, child_name in enumerate(dt.children):
@@ -294,8 +340,13 @@ class TestXarrayKatIntegration:
       ds = dt[child_name].ds
       assert len(scan_config["indices"]) == len(ds.time)
       assert np.all(scan_config["target_name"] == ds.field_name.data)
-      assert "VISIBILITY" in ds
-      assert "time" in ds.dims
+
+      # Check that this scan matches the relevant portion of the test data
+      ntime = ds.sizes["time"]
+      np.testing.assert_allclose(
+        ds.VISIBILITY.data, expected[time_index : time_index + ntime]
+      )
+      time_index += ntime
 
   def test_scan_state_filtering(self, httpserver: HTTPServer, tmp_path):
     """Test filtering by scan states."""
