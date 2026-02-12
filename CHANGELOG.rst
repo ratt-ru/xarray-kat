@@ -3,6 +3,7 @@ Changelog
 
 X.Y.Z (DD-MM-YYY)
 -----------------
+* Test numerical correctness of transformation of archival data into MSv4 format (:pr:`43`)
 * Pass batches through ``virtual_chunked`` stores to HTTP KVStores (:pr:`37`)
 * Move generation of calibration solutions to top level tensorstores  (:pr:`37`)
 * Setup github actions (:pr:`41`)

@@ -23,12 +23,11 @@ from xarray_kat.meerkat_chunk_manager import MeerkatArray
 
 
 def assert_visibilities_allclose(a, b):
-  """Helper assert function that exists to
-  signal that comparison of visibilities should
-  be treated with care. This is because
-  xarray-kat applies van-vleck corrections
-  and weight scaling transforms that subtly modify
-  the archival data"""
+  """Helper assert function signalling
+  that comparison of visibilities should
+  be treated with care.
+  xarray-kat may subtly modify archive data.
+  (i.e. via application of the van vleck transform)"""
   # For testing purposes, an allclose appears sufficient
   return np.testing.assert_allclose(a, b)
 
