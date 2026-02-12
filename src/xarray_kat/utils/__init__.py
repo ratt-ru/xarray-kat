@@ -1,5 +1,7 @@
+import re
 from typing import Iterable
 
+import numpy.typing as npt
 from xarray.core.types import T_NormalizedChunks
 
 
@@ -99,3 +101,40 @@ def normalize_chunks(
       raise TypeError(f"Invalid chunk type: {type(c)}. Expected int or Iterable.")
 
   return tuple(normalized)
+
+
+CORRPROD_REGEX = re.compile(
+  r"(?P<dish>[mMsSeE])(?P<number>\d+)(?P<polarization>[hHvV])"
+)
+
+
+def corrprods_to_baseline_pols(corrprods: npt.NDArray):
+  """Split correlation products of the form ``["m001v", "m002h"]`` into
+  tuples of the form ``(("m001", "m002"), "vh")``"""
+  result = []
+
+  for cp1, cp2 in corrprods:
+    if (
+      (cp1_match := re.match(CORRPROD_REGEX, cp1)) is None
+      or (cp1_dish := cp1_match.group("dish")) is None
+      or (cp1_nr := cp1_match.group("number")) is None
+      or (cp1_pol := cp1_match.group("polarization")) is None
+    ):
+      raise ValueError(f"{cp1} is not a valid correlation product string {cp1_match}")
+    if (
+      (cp2_match := re.match(CORRPROD_REGEX, cp2)) is None
+      or (cp2_dish := cp2_match.group("dish")) is None
+      or (cp2_nr := cp2_match.group("number")) is None
+      or (cp2_pol := cp2_match.group("polarization")) is None
+    ):
+      raise ValueError(f"{cp2} is not a valid correlation product string {cp2_match}")
+
+    result.append(
+      (
+        f"{cp1_dish.lower()}{cp1_nr}",
+        f"{cp2_dish.lower()}{cp2_nr}",
+        f"{cp1_pol.lower()}{cp2_pol.lower()}",
+      )
+    )
+
+  return result

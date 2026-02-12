@@ -25,6 +25,7 @@ from katsdptelstate.rdb_writer_base import RDBWriterBase
 from pytest_httpserver import HTTPServer
 
 from xarray_kat.multiton import Multiton
+from xarray_kat.utils import corrprods_to_baseline_pols
 
 logger = logging.getLogger(__name__)
 
@@ -483,7 +484,11 @@ class SyntheticObservation:
       target: Target name (None for slew states).
     """
     self.scan_configs.append(
-      {"indices": indices, "state": state, "target_name": target}
+      {
+        "indices": list(indices) if isinstance(indices, range) else indices,
+        "state": state,
+        "target_name": target,
+      }
     )
 
   def _get_time_chunks(self) -> Tuple[int, ...]:
@@ -652,6 +657,27 @@ class SyntheticObservation:
 
     else:
       raise ValueError(f"Unknown array name: {array_name}")
+
+  def generate_msv4_array_data(
+    self, array_name: str, dtype: npt.DTypeLike, shape: Tuple[int, ...]
+  ) -> npt.NDArray:
+    """Generate MSv4 synthetic data for a specific array.
+
+    Args:
+      array_name: Name of the array ('correlator_data', 'flags', etc.).
+      dtype: Numpy data type.
+      shape: Array shape.
+
+    Returns:
+      Synthetic data array with realistic values.
+    """
+    data = self.generate_array_data(array_name, dtype, shape)
+    corrprods = corrprods_to_baseline_pols(self.bls_ordering)
+    cp_argsort = np.array(sorted(range(len(corrprods)), key=lambda i: corrprods[i]))
+    data = data[..., cp_argsort].reshape(self.ntime, self.nfreq, self.nbl, self.npol)
+    return data.transpose(0, 2, 1, 3).reshape(
+      self.ntime, self.nbl, self.nfreq, self.npol
+    )
 
   def _save_array_chunks(
     self, base_path: Path, prefix: str, array_name: str, array_meta: Dict

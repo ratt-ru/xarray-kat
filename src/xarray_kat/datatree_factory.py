@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import calendar
-import re
 import time
 import warnings
 from datetime import datetime, timezone
@@ -9,7 +8,6 @@ from importlib.metadata import version as importlib_version
 from typing import TYPE_CHECKING, Dict, Iterable, Set
 
 import numpy as np
-import numpy.typing as npt
 import tensorstore as ts
 import xarray
 from xarray.core.indexing import LazilyIndexedArray
@@ -22,14 +20,12 @@ from xarray_kat.array import (
 from xarray_kat.katdal_types import corrprod_to_autocorr
 from xarray_kat.multiton import Multiton
 from xarray_kat.stores.vis_weight_flag_store_factory import VisWeightFlagFactory
+from xarray_kat.utils import corrprods_to_baseline_pols
 from xarray_kat.xkat_types import VanVleckLiteralType
 
 if TYPE_CHECKING:
   from xarray_kat.katdal_types import TelstateDataProducts
 
-CORRPROD_REGEX = re.compile(
-  r"(?P<dish>[mMsSeE])(?P<number>\d+)(?P<polarization>[hHvV])"
-)
 
 HV_TO_LINEAR_MAP = {
   "hh": "XX",
@@ -44,38 +40,6 @@ STATE_PARTICIPLE_MAP = {
   "slew": "slewing towards",
   "track": "tracking",
 }
-
-
-def _corrprods_to_baseline_pols(corrprods: npt.NDArray):
-  """Split correlation products of the form ``["m001v", "m002h"]`` into
-  tuples of the form ``(("m001", "m002"), "vh")``"""
-  result = []
-
-  for cp1, cp2 in corrprods:
-    if (
-      (cp1_match := re.match(CORRPROD_REGEX, cp1)) is None
-      or (cp1_dish := cp1_match.group("dish")) is None
-      or (cp1_nr := cp1_match.group("number")) is None
-      or (cp1_pol := cp1_match.group("polarization")) is None
-    ):
-      raise ValueError(f"{cp1} is not a valid correlation product string {cp1_match}")
-    if (
-      (cp2_match := re.match(CORRPROD_REGEX, cp2)) is None
-      or (cp2_dish := cp2_match.group("dish")) is None
-      or (cp2_nr := cp2_match.group("number")) is None
-      or (cp2_pol := cp2_match.group("polarization")) is None
-    ):
-      raise ValueError(f"{cp2} is not a valid correlation product string {cp2_match}")
-
-    result.append(
-      (
-        f"{cp1_dish.lower()}{cp1_nr}",
-        f"{cp2_dish.lower()}{cp2_nr}",
-        f"{cp1_pol.lower()}{cp2_pol.lower()}",
-      )
-    )
-
-  return result
 
 
 def _index_store(store: Multiton[ts.TensorStore], index, origin=0) -> ts.TensorStore:
@@ -200,7 +164,7 @@ class DataTreeFactory:
 
     corrprods = telstate["bls_ordering"]
     autocorrs = Multiton(corrprod_to_autocorr, corrprods)
-    baseline_pols = _corrprods_to_baseline_pols(corrprods)
+    baseline_pols = corrprods_to_baseline_pols(corrprods)
     assert len(corrprods) == len(baseline_pols)
     cp_argsort = np.array(
       sorted(range(len(baseline_pols)), key=lambda i: baseline_pols[i])
