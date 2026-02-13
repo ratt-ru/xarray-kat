@@ -24,8 +24,9 @@ from xarray_kat.utils import corrprods_to_baseline_pols
 from xarray_kat.xkat_types import VanVleckLiteralType
 
 if TYPE_CHECKING:
-  from xarray_kat.katdal_types import TelstateDataProducts
   from katpoint import Target
+
+  from xarray_kat.katdal_types import TelstateDataProducts
 
 
 HV_TO_LINEAR_MAP = {
@@ -148,11 +149,13 @@ class DataTreeFactory:
           },
         ),
         "ANTENNA_DISH_DIAMETER": Variable(
-          "antenna_name", np.asarray([a.diameter for a in antennas]),
+          "antenna_name",
+          np.asarray([a.diameter for a in antennas]),
           {"type": "quantity", "units": "m"},
         ),
         "ANTENNA_EFFECTIVE_DISH_DIAMETER": Variable(
-          "antenna_name", np.asarray([a.diameter for a in antennas]),
+          "antenna_name",
+          np.asarray([a.diameter for a in antennas]),
           {"type": "quantity", "units": "m"},
         ),
         # The reference angle for polarisation (double, 1-dim). A parallactic angle of
