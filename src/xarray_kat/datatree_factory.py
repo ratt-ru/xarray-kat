@@ -19,7 +19,7 @@ from xarray_kat.array import (
 )
 from xarray_kat.katdal_types import corrprod_to_autocorr
 from xarray_kat.multiton import Multiton
-from xarray_kat.stores.vis_weight_flag_store_factory import VisWeightFlagFactory
+from xarray_kat.tensorstores.vis_weight_flag_store_factory import VisWeightFlagFactory
 from xarray_kat.utils import corrprods_to_baseline_pols
 from xarray_kat.xkat_types import VanVleckLiteralType
 
