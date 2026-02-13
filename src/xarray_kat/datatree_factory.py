@@ -5,7 +5,7 @@ import time
 import warnings
 from datetime import datetime, timezone
 from importlib.metadata import version as importlib_version
-from typing import TYPE_CHECKING, Dict, Iterable, Set
+from typing import TYPE_CHECKING, Dict, Iterable, NamedTuple, Set
 
 import numpy as np
 import tensorstore as ts
@@ -42,11 +42,31 @@ STATE_PARTICIPLE_MAP = {
 }
 
 
+TELESCOPE_NAME = "MeerKat"
+
+
 def _index_store(store: Multiton[ts.TensorStore], index, origin=0) -> ts.TensorStore:
   """Helper function for delaying indexing of a TensorStore held by a Multiton.
   Commonly this is used to slice the time axis of the entire observation into
   separate scans/partitions. For this reason the origin is reset to zero"""
   return store.instance[index].translate_to[origin]
+
+
+class ObservationMetadata(NamedTuple):
+  timestamps: np.ndarray
+  integration_time: float
+  start_iso: str
+  end_iso: str
+  observer: str
+  experiment_id: str
+  chan_freqs: np.ndarray
+  band: str
+  center_freq: float
+  channel_width: float
+  ant1_names: np.ndarray
+  ant2_names: np.ndarray
+  pols: np.ndarray
+  cp_argsort: np.ndarray
 
 
 class DataTreeFactory:
@@ -107,6 +127,126 @@ class DataTreeFactory:
 
     return chunks
 
+  def _build_antenna_dataset(self) -> Dataset:
+    """Build the antenna xds Dataset (scan-invariant)."""
+    antennas = self._data_products.instance.antennas
+    antenna_polarization_types = ["X", "Y"]
+    receptor_labels = ["pol_0", "pol_1"]
+
+    return Dataset(
+      data_vars={
+        "ANTENNA_POSITION": Variable(
+          ("antenna_name", "cartesian_pos_label"),
+          np.asarray([a.position_ecef for a in antennas]),
+        ),
+        "ANTENNA_DISH_DIAMETER": Variable(
+          "antenna_name", np.asarray([a.diameter for a in antennas])
+        ),
+        "ANTENNA_EFFECTIVE_DISH_DIAMETER": Variable(
+          "antenna_name", np.asarray([a.diameter for a in antennas])
+        ),
+        # The reference angle for polarisation (double, 1-dim). A parallactic angle of
+        # 0 means that V is aligned to x (celestial North), but we are mapping H to x
+        # so we have to correct with a -90 degree rotation.
+        "ANTENNA_RECEPTOR_ANGLE": Variable(
+          ("antenna_name", "receptor_angle"),
+          np.full((len(antennas), 2), -np.pi / 2, np.float64),
+        ),
+      },
+      coords={
+        "antenna_name": Variable("antenna_name", [a.name for a in antennas]),
+        "mount": Variable("antenna_name", ["ALT-AZ"] * len(antennas)),
+        "telescope_name": Variable("antenna_name", [TELESCOPE_NAME] * len(antennas)),
+        "station_name": Variable("antenna_name", [a.name for a in antennas]),
+        "cartesian_pos_label": Variable("cartesian_pos_label", ["x", "y", "z"]),
+        "polarization_type": Variable(
+          ("antenna_name", "receptor_label"),
+          [antenna_polarization_types] * len(antennas),
+        ),
+        "receptor_label": Variable("receptor_label", receptor_labels),
+      },
+      attrs={
+        "type": "antenna",
+        "overall_telescope_name": TELESCOPE_NAME,
+        "relocatable_antennas": False,
+      },
+    )
+
+  def _build_correlated_dataset(
+    self,
+    meta: ObservationMetadata,
+    scan_timestamps: np.ndarray,
+    target,
+    scan_index: int,
+    state: str,
+    data_vars: Dict[str, Variable],
+  ) -> Dataset:
+    """Build a correlated visibility Dataset for a single scan."""
+    description = f"Scan {scan_index} {STATE_PARTICIPLE_MAP[state]} {target.name}"
+
+    return Dataset(
+      data_vars=data_vars,
+      coords={
+        "time": Variable(
+          "time",
+          scan_timestamps,
+          {
+            "type": "time",
+            "units": "s",
+            "scale": "utc",
+            "format": "unix",
+            "integration_time": {
+              "attrs": {"type": "quantity", "units": "s"},
+              "data": meta.integration_time,
+            },
+          },
+        ),
+        "field_name": Variable("time", [target.name] * len(scan_timestamps)),
+        "scan_name": Variable("time", [str(scan_index)] * len(scan_timestamps)),
+        "frequency": Variable(
+          "frequency",
+          meta.chan_freqs,
+          {
+            "type": "spectral_coord",
+            "observer": "TOPO",
+            "units": "Hz",
+            "spectral_window_name": f"{meta.band}-band",
+            "frequency_group_name": "none",
+            "reference_frequency": {
+              "attrs": {"type": "spectral_coord", "observer": "TOPO", "units": "Hz"},
+              # TODO(sjperkins): Confirm this
+              "data": meta.center_freq,
+            },
+            "channel_width": {
+              "attrs": {"type": "quantity", "units": "Hz"},
+              "data": meta.channel_width,
+            },
+            "effective_channel_width": "EFFECTIVE_CHANNEL_WIDTH",
+          },
+        ),
+        "polarization": Variable("polarization", meta.pols),
+        "baseline_id": Variable("baseline_id", np.arange(len(meta.ant1_names))),
+        "baseline_antenna1_name": Variable("baseline_id", meta.ant1_names),
+        "baseline_antenna2_name": Variable("baseline_id", meta.ant2_names),
+      },
+      attrs={
+        "creation_date": meta.start_iso,
+        "creator": {
+          "software_name": "xarray-kat",
+          "version": importlib_version("xarray-kat"),
+        },
+        "description": description,
+        "observation_info": {
+          "observer": meta.observer,
+          "project_uid": meta.experiment_id,
+          "release_date": meta.end_iso,
+        },
+        "schema_version": "4.0.0",
+        "processor_info": {"sub_type": TELESCOPE_NAME, "type": "CORRELATOR"},
+        "type": "visibility",
+      },
+    )
+
   def create(self) -> Dict[str, Dataset]:
     if self._chunks is not None:
       ArrayClass = DelayedBackendArray
@@ -142,7 +282,6 @@ class DataTreeFactory:
     end_iso = datetime.fromtimestamp(end_utc, timezone.utc).isoformat()
     observer = telstate["obs_params"].get("observer", "unknown")
     experiment_id = telstate["obs_params"].get("experiment_id", "unknown")
-    telescope_name = "MeerKat"
 
     # Frequency metadata
     band = telstate["sub_band"]
@@ -151,11 +290,6 @@ class DataTreeFactory:
     center_freq = telstate["center_freq"]
     channel_width = bandwidth / nchan
     chan_freqs = (center_freq - (bandwidth / 2)) + np.arange(nchan) * channel_width
-
-    # Antenna metdata
-    antennas = self._data_products.instance.antennas
-    antenna_polarization_types = ["X", "Y"]
-    receptor_labels = ["pol_0", "pol_1"]
 
     # Correlation Product metadata
     corrprods = telstate["bls_ordering"]
@@ -178,6 +312,23 @@ class DataTreeFactory:
     ant2_names = np.array(cp_ant2_names[:: len(upols)], dtype=str)
     pols = np.array([HV_TO_LINEAR_MAP[p] for p in cp_pols[: len(upols)]], dtype=str)
 
+    meta = ObservationMetadata(
+      timestamps=timestamps,
+      integration_time=integration_time,
+      start_iso=start_iso,
+      end_iso=end_iso,
+      observer=observer,
+      experiment_id=experiment_id,
+      chan_freqs=chan_freqs,
+      band=band,
+      center_freq=center_freq,
+      channel_width=channel_width,
+      ant1_names=ant1_names,
+      ant2_names=ant2_names,
+      pols=pols,
+      cp_argsort=cp_argsort,
+    )
+
     vfw_factory = VisWeightFlagFactory(
       self._data_products,
       autocorrs,
@@ -198,6 +349,7 @@ class DataTreeFactory:
 
     unique_scans, scan_inv = np.unique(scan_indices, return_inverse=True)
 
+    antenna_ds = self._build_antenna_dataset()
     tree: Dict[str, Dataset] = {}
 
     for i, scan_index in enumerate(unique_scans):
@@ -211,22 +363,16 @@ class DataTreeFactory:
         mask_index = slice(mask_index[0], mask_index[-1] + 1)
 
       vis_array = ArrayClass(
-        Multiton(_index_store, corr_data_store, mask_index), cp_argsort, len(pols)
+        Multiton(_index_store, corr_data_store, mask_index), meta.cp_argsort, len(pols)
       )
 
       weight_array = ArrayClass(
-        Multiton(_index_store, weight_store, mask_index), cp_argsort, len(pols)
+        Multiton(_index_store, weight_store, mask_index), meta.cp_argsort, len(pols)
       )
 
       flag_array = ArrayClass(
-        Multiton(_index_store, flag_store, mask_index), cp_argsort, len(pols)
+        Multiton(_index_store, flag_store, mask_index), meta.cp_argsort, len(pols)
       )
-
-      name_array_map = [
-        ("VISIBILITY", vis_array),
-        ("WEIGHT", weight_array),
-        ("FLAG", flag_array),
-      ]
 
       data_vars = {
         n: Variable(
@@ -235,107 +381,25 @@ class DataTreeFactory:
           None,
           {"preferred_chunks": self.merge_chunks(n, a)},
         )
-        for n, a in name_array_map
-      }
-      time_attrs = {
-        "type": "time",
-        "units": "s",
-        "scale": "utc",
-        "format": "unix",
-        "integration_time": {
-          "attrs": {"type": "quantity", "units": "s"},
-          "data": integration_time,
-        },
+        for n, a in [
+          ("VISIBILITY", vis_array),
+          ("WEIGHT", weight_array),
+          ("FLAG", flag_array),
+        ]
       }
 
-      freq_attrs = {
-        "type": "spectral_coord",
-        "observer": "TOPO",
-        "units": "Hz",
-        "spectral_window_name": f"{band}-band",
-        "frequency_group_name": "none",
-        "reference_frequency": {
-          "attrs": {"type": "spectral_coord", "observer": "TOPO", "units": "Hz"},
-          # TODO(sjperkins): Confirm this
-          "data": center_freq,
-        },
-        "channel_width": {
-          "attrs": {"type": "quantity", "units": "Hz"},
-          "data": channel_width,
-        },
-        "effective_channel_width": "EFFECTIVE_CHANNEL_WIDTH",
-      }
-
-      scan_timestamps = timestamps[mask_index]
-      description = f"Scan {scan_index} {STATE_PARTICIPLE_MAP[state]} {target.name}"
-
-      correlated_ds = Dataset(
-        data_vars=data_vars,
-        coords={
-          "time": Variable("time", scan_timestamps, time_attrs),
-          "field_name": Variable("time", [target.name] * len(scan_timestamps)),
-          "scan_name": Variable("time", [str(scan_index)] * len(scan_timestamps)),
-          "frequency": Variable("frequency", chan_freqs, freq_attrs),
-          "polarization": Variable("polarization", pols),
-          "baseline_id": Variable("baseline_id", np.arange(len(ant1_names))),
-          "baseline_antenna1_name": Variable("baseline_id", ant1_names),
-          "baseline_antenna2_name": Variable("baseline_id", ant2_names),
-        },
-        attrs={
-          "creation_date": start_iso,
-          "creator": {
-            "software_name": "xarray-kat",
-            "version": importlib_version("xarray-kat"),
-          },
-          "description": description,
-          "observation_info": {
-            "observer": observer,
-            "project_uid": experiment_id,
-            "release_date": end_iso,
-          },
-          "schema_version": "4.0.0",
-          "processor_info": {"sub_type": "MEERKAT", "type": "CORRELATOR"},
-          "type": "visibility",
-        },
+      scan_timestamps = meta.timestamps[mask_index]
+      correlated_ds = self._build_correlated_dataset(
+        meta,
+        scan_timestamps,
+        target,
+        scan_index,
+        state,
+        data_vars,
       )
 
       correlated_node_name = f"{self._data_products.instance.name}_{i:03d}"
       tree[correlated_node_name] = correlated_ds
-
-      antenna_ds = Dataset(
-        data_vars={
-          "ANTENNA_POSITION": Variable(
-            ("antenna_name", "cartesian_pos_label"),
-            np.asarray([a.position_ecef for a in antennas]),
-          ),
-          "ANTENNA_DISH_DIAMETER": Variable(
-            "antenna_name", np.asarray([a.diameter for a in antennas])
-          ),
-          "ANTENNA_EFFECTIVE_DISH_DIAMETER": Variable(
-            "antenna_name", np.asarray([a.diameter for a in antennas])
-          ),
-          # The reference angle for polarisation (double, 1-dim). A parallactic angle of
-          # 0 means that V is aligned to x (celestial North), but we are mapping H to x
-          # so we have to correct with a -90 degree rotation.
-          "ANTENNA_RECEPTOR_ANGLE": Variable(
-            ("antenna_name", "receptor_angle"),
-            np.full((len(antennas), 2), -np.pi / 2, np.float64),
-          ),
-        },
-        coords={
-          "antenna_name": Variable("antenna_name", [a.name for a in antennas]),
-          "mount": Variable("antenna_name", ["ALT-AZ"] * len(antennas)),
-          "telescope_name": Variable("antenna_name", [telescope_name] * len(antennas)),
-          "station_name": Variable("antenna_name", [a.name for a in antennas]),
-          "cartesian_pos_label": Variable("cartesian_pos_label", ["x", "y", "z"]),
-          "polarization_type": Variable(
-            ("antenna_name", "receptor_label"),
-            [antenna_polarization_types] * len(antennas),
-          ),
-          "receptor_label": Variable("receptor_label", receptor_labels),
-        },
-      )
-
       tree[f"{correlated_node_name}/antenna_xds"] = antenna_ds
 
     return tree
