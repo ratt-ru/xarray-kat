@@ -12,6 +12,7 @@ dependencies = [
     "katsdptelstate[rdb]>=1.0.0",
     "tensorstore>=0.1.81",
     "xarray>=2025.9.1",
+    "xradio>=1.1.1",
 ]
 
 [project.entry-points."xarray.backends"]
