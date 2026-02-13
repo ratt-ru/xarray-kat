@@ -683,11 +683,9 @@ class SyntheticObservation:
       Synthetic data array with realistic values.
     """
     data = self.generate_array_data(array_name, dtype, shape)
-    cp_argsort = self.corrprod_argsort()
-    data = data[..., cp_argsort].reshape(self.ntime, self.nfreq, self.nbl, self.npol)
-    return data.transpose(0, 2, 1, 3).reshape(
-      self.ntime, self.nbl, self.nfreq, self.npol
-    )
+    nt, nbl, nf, np = self.ntime, self.nbl, self.nfreq, self.npol
+    data = data[..., self.corrprod_argsort].reshape(nt, nf, nbl, np)
+    return data.transpose(0, 2, 1, 3).reshape(nt, nbl, nf, np)
 
   def _save_array_chunks(
     self, base_path: Path, prefix: str, array_name: str, array_meta: Dict
