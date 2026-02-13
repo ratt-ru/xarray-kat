@@ -3,6 +3,7 @@ Changelog
 
 X.Y.Z (DD-MM-YYY)
 -----------------
+* Support ``antenna_xds`` dataset (:pr:`44`)
 * Test numerical correctness of transformation of archival data into MSv4 format (:pr:`43`)
 * Pass batches through ``virtual_chunked`` stores to HTTP KVStores (:pr:`37`)
 * Move generation of calibration solutions to top level tensorstores  (:pr:`37`)

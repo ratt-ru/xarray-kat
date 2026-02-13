@@ -399,6 +399,78 @@ class TestXarrayKatIntegration:
       assert "VISIBILITY" in ds
       assert "time" in ds.dims
 
+  def test_antenna_xds_dataset(self, httpserver: HTTPServer, tmp_path):
+    """Test antenna_xds dataset structure, values, and scan invariance."""
+    from katpoint import Antenna as KatAntenna
+
+    obs = SyntheticObservation("1234567890", ntime=16, nfreq=16, nants=4)
+    obs.add_scan(range(0, 8), "track", "PKS1934")
+    obs.add_scan(range(8, 16), "scan", "3C286")
+    obs.save_to_directory(tmp_path)
+
+    token = setup_mock_archive_server(
+      httpserver, tmp_path, "1234567890", require_auth=True
+    )
+    base_url = httpserver.url_for("/")
+    rdb_url = f"{base_url}1234567890/1234567890_sdp_l0.full.rdb?token={token}"
+
+    dt = xarray.open_datatree(rdb_url, engine="xarray-kat")
+
+    # Build expected values from katpoint (same observer strings as fixture)
+    expected_antennas = [
+      KatAntenna(f"m{i:03d}, -30.721, 21.411, 1035.0, 13.5, 0.0")
+      for i in range(obs.nants)
+    ]
+    expected_positions = np.array([a.position_ecef for a in expected_antennas])
+    expected_names = [a.name for a in expected_antennas]
+
+    antenna_nodes = []
+    for child_name in dt.children:
+      ant_node = dt[f"{child_name}/antenna_xds"]
+      ant_ds = ant_node.ds
+
+      # Data variables
+      assert set(ant_ds.data_vars) == {
+        "ANTENNA_POSITION",
+        "ANTENNA_DISH_DIAMETER",
+        "ANTENNA_EFFECTIVE_DISH_DIAMETER",
+        "ANTENNA_RECEPTOR_ANGLE",
+      }
+      np.testing.assert_allclose(ant_ds.ANTENNA_POSITION.values, expected_positions)
+      np.testing.assert_array_equal(
+        ant_ds.ANTENNA_DISH_DIAMETER.values, [13.5] * obs.nants
+      )
+      np.testing.assert_array_equal(
+        ant_ds.ANTENNA_EFFECTIVE_DISH_DIAMETER.values, [13.5] * obs.nants
+      )
+      np.testing.assert_allclose(
+        ant_ds.ANTENNA_RECEPTOR_ANGLE.values,
+        np.full((obs.nants, 2), -np.pi / 2),
+      )
+
+      # Coordinates
+      assert list(ant_ds.antenna_name.values) == expected_names
+      assert list(ant_ds.mount.values) == ["ALT-AZ"] * obs.nants
+      assert list(ant_ds.telescope_name.values) == ["MeerKat"] * obs.nants
+      assert list(ant_ds.station_name.values) == expected_names
+      assert list(ant_ds.cartesian_pos_label.values) == ["x", "y", "z"]
+      assert list(ant_ds.receptor_label.values) == ["pol_0", "pol_1"]
+      assert ant_ds.polarization_type.shape == (obs.nants, 2)
+
+      # Attrs
+      assert ant_ds.attrs["type"] == "antenna"
+      assert ant_ds.attrs["overall_telescope_name"] == "MeerKat"
+      assert ant_ds.attrs["relocatable_antennas"] is False
+
+      antenna_nodes.append(ant_node)
+
+    # Verify scan invariance: antenna_xds content is identical across scans.
+    assert len(antenna_nodes) == 2
+    xarray.testing.assert_identical(
+      antenna_nodes[0].to_dataset(inherit=False),
+      antenna_nodes[1].to_dataset(inherit=False),
+    )
+
 
 class TestPytestFixtures:
   """Test using the pytest fixtures from conftest.py."""
