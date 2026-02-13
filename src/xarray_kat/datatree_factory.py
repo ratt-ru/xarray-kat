@@ -142,6 +142,7 @@ class DataTreeFactory:
     end_iso = datetime.fromtimestamp(end_utc, timezone.utc).isoformat()
     observer = telstate["obs_params"].get("observer", "unknown")
     experiment_id = telstate["obs_params"].get("experiment_id", "unknown")
+    telescope_name = "MeerKat"
 
     # Frequency metadata
     band = telstate["sub_band"]
@@ -153,11 +154,7 @@ class DataTreeFactory:
 
     # Antenna metdata
     antennas = self._data_products.instance.antennas
-    antenna_names = [a.name for a in antennas]
-    mount = ["ALT-AZ"] * len(antennas)
-    station = antenna_names
-    telescope_names = ["MeerKAT"] * len(antennas)
-    polarization_types = [["X", "Y"]] * len(antennas)
+    antenna_polarization_types = ["X", "Y"]
     receptor_labels = ["pol_0", "pol_1"]
 
     # Correlation Product metadata
@@ -306,15 +303,34 @@ class DataTreeFactory:
       tree[correlated_node_name] = correlated_ds
 
       antenna_ds = Dataset(
-        data_vars={},
+        data_vars={
+          "ANTENNA_POSITION": Variable(
+            ("antenna_name", "cartesian_pos_label"),
+            np.asarray([a.position_ecef for a in antennas]),
+          ),
+          "ANTENNA_DISH_DIAMETER": Variable(
+            "antenna_name", np.asarray([a.diameter for a in antennas])
+          ),
+          "ANTENNA_EFFECTIVE_DISH_DIAMETER": Variable(
+            "antenna_name", np.asarray([a.diameter for a in antennas])
+          ),
+          # The reference angle for polarisation (double, 1-dim). A parallactic angle of
+          # 0 means that V is aligned to x (celestial North), but we are mapping H to x
+          # so we have to correct with a -90 degree rotation.
+          "ANTENNA_RECEPTOR_ANGLE": Variable(
+            ("antenna_name", "receptor_angle"),
+            np.full((len(antennas), 2), -np.pi / 2, np.float64),
+          ),
+        },
         coords={
-          "antenna_name": Variable("antenna_name", antenna_names),
-          "mount": Variable("antenna_name", mount),
-          "telescope_name": Variable("antenna_name", telescope_names),
-          "station_name": Variable("antenna_name", station),
+          "antenna_name": Variable("antenna_name", [a.name for a in antennas]),
+          "mount": Variable("antenna_name", ["ALT-AZ"] * len(antennas)),
+          "telescope_name": Variable("antenna_name", [telescope_name] * len(antennas)),
+          "station_name": Variable("antenna_name", [a.name for a in antennas]),
           "cartesian_pos_label": Variable("cartesian_pos_label", ["x", "y", "z"]),
           "polarization_type": Variable(
-            ("antenna_name", "receptor_label"), polarization_types
+            ("antenna_name", "receptor_label"),
+            [antenna_polarization_types] * len(antennas),
           ),
           "receptor_label": Variable("receptor_label", receptor_labels),
         },
