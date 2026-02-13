@@ -1,8 +1,7 @@
-from pytest_httpserver import HTTPServer
-
 import xarray
-import xradio  # noqa
-import xradio.measurement_set  # noqa. Required to register types for check_datatree
+import xradio  # noqa: F401
+import xradio.measurement_set  # noqa: F401 Required to register types for check_datatree
+from pytest_httpserver import HTTPServer
 from xradio.schema.check import check_datatree
 
 from tests.conftest import (
@@ -29,4 +28,3 @@ class TestXRadioValidation:
     dt = xarray.open_datatree(rdb_url, engine="xarray-kat")
     issues = check_datatree(dt)
     assert not issues
-
