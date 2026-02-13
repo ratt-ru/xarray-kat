@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Dict, Iterable, Set
 
 import numpy as np
 import tensorstore as ts
-import xarray
+from xarray import Dataset, Variable
 from xarray.core.indexing import LazilyIndexedArray
 
 from xarray_kat.array import (
@@ -107,7 +107,7 @@ class DataTreeFactory:
 
     return chunks
 
-  def create(self) -> Dict[str, xarray.Dataset]:
+  def create(self) -> Dict[str, Dataset]:
     if self._chunks is not None:
       ArrayClass = DelayedBackendArray
 
@@ -151,17 +151,16 @@ class DataTreeFactory:
     channel_width = bandwidth / nchan
     chan_freqs = (center_freq - (bandwidth / 2)) + np.arange(nchan) * channel_width
 
+    # Antenna metdata
+    antennas = self._data_products.instance.antennas
+    antenna_names = [a.name for a in antennas]
+    mount = ["ALT-AZ"] * len(antennas)
+    station = antenna_names
+    telescope_names = ["MeerKAT"] * len(antennas)
+    polarization_types = [["X", "Y"]] * len(antennas)
+    receptor_labels = ["pol_0", "pol_1"]
+
     # Correlation Product metadata
-    ant_names = []
-
-    for resource in telstate["sub_pool_resources"].split(","):
-      try:
-        ant_description = telstate[resource + "_observer"]
-        ant_name, _ = ant_description.split(",", maxsplit=1)
-        ant_names.append(ant_name)
-      except (KeyError, ValueError):
-        continue
-
     corrprods = telstate["bls_ordering"]
     autocorrs = Multiton(corrprod_to_autocorr, corrprods)
     baseline_pols = corrprods_to_baseline_pols(corrprods)
@@ -202,7 +201,7 @@ class DataTreeFactory:
 
     unique_scans, scan_inv = np.unique(scan_indices, return_inverse=True)
 
-    tree: Dict[str, xarray.Dataset] = {}
+    tree: Dict[str, Dataset] = {}
 
     for i, scan_index in enumerate(unique_scans):
       mask = scan_inv == i
@@ -233,7 +232,7 @@ class DataTreeFactory:
       ]
 
       data_vars = {
-        n: xarray.Variable(
+        n: Variable(
           a.dims,
           WrappedArray(a),
           None,
@@ -273,19 +272,17 @@ class DataTreeFactory:
       scan_timestamps = timestamps[mask_index]
       description = f"Scan {scan_index} {STATE_PARTICIPLE_MAP[state]} {target.name}"
 
-      ds = xarray.Dataset(
+      correlated_ds = Dataset(
         data_vars=data_vars,
         coords={
-          "time": xarray.Variable("time", scan_timestamps, time_attrs),
-          "field_name": xarray.Variable("time", [target.name] * len(scan_timestamps)),
-          "scan_name": xarray.Variable(
-            "time", [str(scan_index)] * len(scan_timestamps)
-          ),
-          "frequency": xarray.Variable("frequency", chan_freqs, freq_attrs),
-          "polarization": xarray.Variable("polarization", pols),
-          "baseline_id": xarray.Variable("baseline_id", np.arange(len(ant1_names))),
-          "baseline_antenna1_name": xarray.Variable("baseline_id", ant1_names),
-          "baseline_antenna2_name": xarray.Variable("baseline_id", ant2_names),
+          "time": Variable("time", scan_timestamps, time_attrs),
+          "field_name": Variable("time", [target.name] * len(scan_timestamps)),
+          "scan_name": Variable("time", [str(scan_index)] * len(scan_timestamps)),
+          "frequency": Variable("frequency", chan_freqs, freq_attrs),
+          "polarization": Variable("polarization", pols),
+          "baseline_id": Variable("baseline_id", np.arange(len(ant1_names))),
+          "baseline_antenna1_name": Variable("baseline_id", ant1_names),
+          "baseline_antenna2_name": Variable("baseline_id", ant2_names),
         },
         attrs={
           "creation_date": start_iso,
@@ -305,6 +302,24 @@ class DataTreeFactory:
         },
       )
 
-      tree[f"{self._data_products.instance.name}_{i:03d}"] = ds
+      correlated_node_name = f"{self._data_products.instance.name}_{i:03d}"
+      tree[correlated_node_name] = correlated_ds
+
+      antenna_ds = Dataset(
+        data_vars={},
+        coords={
+          "antenna_name": Variable("antenna_name", antenna_names),
+          "mount": Variable("antenna_name", mount),
+          "telescope_name": Variable("antenna_name", telescope_names),
+          "station_name": Variable("antenna_name", station),
+          "cartesian_pos_label": Variable("cartesian_pos_label", ["x", "y", "z"]),
+          "polarization_type": Variable(
+            ("antenna_name", "receptor_label"), polarization_types
+          ),
+          "receptor_label": Variable("receptor_label", receptor_labels),
+        },
+      )
+
+      tree[f"{correlated_node_name}/antenna_xds"] = antenna_ds
 
     return tree
