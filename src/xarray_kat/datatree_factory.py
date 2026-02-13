@@ -44,9 +44,9 @@ STATE_PARTICIPLE_MAP = {
 }
 
 TAG_TO_INTENT = {
-  'gaincal': 'CALIBRATE_PHASE,CALIBRATE_AMPLI',
-  'bpcal': 'CALIBRATE_BANDPASS,CALIBRATE_FLUX',
-  'target': 'TARGET'
+  "gaincal": "CALIBRATE_PHASE,CALIBRATE_AMPLI",
+  "bpcal": "CALIBRATE_BANDPASS,CALIBRATE_FLUX",
+  "target": "TARGET",
 }
 
 
@@ -228,7 +228,6 @@ class DataTreeFactory:
           [str(scan_index)] * len(scan_timestamps),
           {"coordinates": "scan_name", "scan_intents": scan_intents},
         ),
-
         "frequency": Variable(
           "frequency",
           meta.chan_freqs,
@@ -411,14 +410,14 @@ class DataTreeFactory:
         Multiton(_index_store, flag_store, mask_index), meta.cp_argsort, len(pols)
       )
 
-
       data_vars = {
         names: Variable(
           array.dims,
           WrappedArray(array),
           attrs,
           {"preferred_chunks": self.merge_chunks(names, array)},
-        ) for names, array, attrs in [
+        )
+        for names, array, attrs in [
           ("VISIBILITY", vis_array, {"units": "Jy"}),
           ("WEIGHT", weight_array, None),
           ("FLAG", flag_array, None),
