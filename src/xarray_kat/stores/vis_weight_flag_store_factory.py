@@ -193,7 +193,7 @@ class VisWeightFlagFactory:
       self._data_products,
       self._autocorrs,
       final_metadata.copy(dtype=array_meta["weights_channel"].dtype),
-      telstate.get("needs_weight_power_scale", False),
+      not telstate.get("needs_weight_power_scale", False),
       top_level_thread_ctx,
     )
 

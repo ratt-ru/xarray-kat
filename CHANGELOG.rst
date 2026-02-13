@@ -3,6 +3,7 @@ Changelog
 
 X.Y.Z (DD-MM-YYY)
 -----------------
+* Test that xarray-kat and katdal produce the same data for the same data source (:pr:`45`)
 * Support ``antenna_xds`` dataset (:pr:`44`)
 * Test numerical correctness of transformation of archival data into MSv4 format (:pr:`43`)
 * Pass batches through ``virtual_chunked`` stores to HTTP KVStores (:pr:`37`)
