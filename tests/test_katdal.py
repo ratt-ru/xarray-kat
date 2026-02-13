@@ -11,6 +11,7 @@ from tests.conftest import (
 
 class TestKatdal:
   def test_katdal_mock_server_basic(self, httpserver: HTTPServer, tmp_path):
+    """Tests that xarray-kat and katdal return the same data from the same datasource"""
     obs = SyntheticObservation("1234567890", ntime=8, nfreq=16, nants=4)
     obs.add_scan(range(0, 8), "track", "PKS1934")
     obs.save_to_directory(tmp_path)
