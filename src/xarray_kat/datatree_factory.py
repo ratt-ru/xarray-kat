@@ -25,6 +25,7 @@ from xarray_kat.xkat_types import VanVleckLiteralType
 
 if TYPE_CHECKING:
   from xarray_kat.katdal_types import TelstateDataProducts
+  from katpoint import Target
 
 
 HV_TO_LINEAR_MAP = {
@@ -186,7 +187,7 @@ class DataTreeFactory:
     self,
     meta: ObservationMetadata,
     scan_timestamps: np.ndarray,
-    target,
+    target: Target,
     scan_index: int,
     state: str,
     data_vars: Dict[str, Variable],
