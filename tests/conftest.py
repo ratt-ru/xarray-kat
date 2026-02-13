@@ -534,6 +534,10 @@ class SyntheticObservation:
       "bandwidth": self.bandwidth,
       "n_chans": self.nfreq,
       "sub_band": "l",  # L-band
+      # Modern MeerKAT datasets need weight scaling to be applied
+      # https://skaafrica.atlassian.net/browse/SR-1230
+      # https://github.com/ska-sa/katdal/pull/189
+      "need_weights_power_scale": True,
       # Antenna information
       "sub_pool_resources": ",".join(self.ant_names),
       "bls_ordering": self.bls_ordering,
@@ -613,6 +617,13 @@ class SyntheticObservation:
 
     return telstate
 
+  @property
+  def corrprod_argsort(self) -> npt.NDArray:
+    """Returns an array that sorts the ``corrprod`` dimensions
+    into a canonical (baseline_id, polarization) ordering"""
+    corrprods = corrprods_to_baseline_pols(self.bls_ordering)
+    return np.array(sorted(range(len(corrprods)), key=lambda i: corrprods[i]))
+
   def generate_array_data(
     self, array_name: str, dtype: npt.DTypeLike, shape: Tuple[int, ...]
   ) -> npt.NDArray:
@@ -672,8 +683,7 @@ class SyntheticObservation:
       Synthetic data array with realistic values.
     """
     data = self.generate_array_data(array_name, dtype, shape)
-    corrprods = corrprods_to_baseline_pols(self.bls_ordering)
-    cp_argsort = np.array(sorted(range(len(corrprods)), key=lambda i: corrprods[i]))
+    cp_argsort = self.corrprod_argsort()
     data = data[..., cp_argsort].reshape(self.ntime, self.nfreq, self.nbl, self.npol)
     return data.transpose(0, 2, 1, 3).reshape(
       self.ntime, self.nbl, self.nfreq, self.npol
