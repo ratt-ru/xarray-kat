@@ -138,12 +138,21 @@ class DataTreeFactory:
         "ANTENNA_POSITION": Variable(
           ("antenna_name", "cartesian_pos_label"),
           np.asarray([a.position_ecef for a in antennas]),
+          {
+            "coordinate_system": "geocentric",
+            "origin_object_name": "earth",
+            "type": "location",
+            "units": "m",
+            "frame": "ITRS",
+          },
         ),
         "ANTENNA_DISH_DIAMETER": Variable(
-          "antenna_name", np.asarray([a.diameter for a in antennas])
+          "antenna_name", np.asarray([a.diameter for a in antennas]),
+          {"type": "quantity", "units": "m"},
         ),
         "ANTENNA_EFFECTIVE_DISH_DIAMETER": Variable(
-          "antenna_name", np.asarray([a.diameter for a in antennas])
+          "antenna_name", np.asarray([a.diameter for a in antennas]),
+          {"type": "quantity", "units": "m"},
         ),
         # The reference angle for polarisation (double, 1-dim). A parallactic angle of
         # 0 means that V is aligned to x (celestial North), but we are mapping H to x
@@ -151,6 +160,7 @@ class DataTreeFactory:
         "ANTENNA_RECEPTOR_ANGLE": Variable(
           ("antenna_name", "receptor_angle"),
           np.full((len(antennas), 2), -np.pi / 2, np.float64),
+          {"type": "quantity", "units": "rad"},
         ),
       },
       coords={
