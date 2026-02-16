@@ -413,7 +413,6 @@ class DataTreeFactory:
 
       # Pre-calculate UVW coordinates
       scan_timestamps = meta.timestamps[mask_index]
-      breakpoint()
       # Compute UVW coordinates for a chunk of timesteps.
       uvw_ant = target.uvw(antennas, scan_timestamps, array_centre)
       # Permute from axis, time, antenna to time, antenna, axis
