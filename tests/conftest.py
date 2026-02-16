@@ -578,7 +578,6 @@ class SyntheticObservation:
 
     from tests.meerkat_antennas import MEERKAT_ANTENNA_DESCRIPTIONS
 
-
     # Add per-antenna observer strings
     for ant in self.ant_names:
       ant_desc = MEERKAT_ANTENNA_DESCRIPTIONS[ant]
