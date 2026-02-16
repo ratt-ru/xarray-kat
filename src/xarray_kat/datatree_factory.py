@@ -330,8 +330,8 @@ class DataTreeFactory:
     ant2_names = np.array(cp_ant2_names[:: len(upols)], dtype=str)
     concat_ant_names = np.concatenate([ant1_names, ant2_names])
     _, inv = np.unique(concat_ant_names, return_inverse=True)
-    ant1_index = inv[len(inv)//2:]
-    ant2_index = inv[:len(inv)//2]
+    ant1_index = inv[len(inv) // 2 :]
+    ant2_index = inv[: len(inv) // 2]
 
     pols = np.array([HV_TO_LINEAR_MAP[p] for p in cp_pols[: len(upols)]], dtype=str)
 
@@ -423,22 +423,22 @@ class DataTreeFactory:
       # Measurement Set `definition`_.
       # .. _CASA: https://casa.nrao.edu/Memos/CoordConvention.pdf
       # .. _definition: https://casa.nrao.edu/Memos/229.html#SECTION00064000000000000000
-      uvw_coordinates = (np.take(uvw_ant, ant1_index, axis=1)
-                          - np.take(uvw_ant, ant2_index, axis=1))
-
+      uvw_coordinates = np.take(uvw_ant, ant1_index, axis=1) - np.take(
+        uvw_ant, ant2_index, axis=1
+      )
 
       flag_p_chunks = data_vars["FLAG"].encoding["preferred_chunks"]
       uvw_preferred_chunks = {
         "time": flag_p_chunks["time"],
         "baseline_id": flag_p_chunks["baseline_id"],
-        "uvw_label": 3
+        "uvw_label": 3,
       }
 
       data_vars["UVW"] = Variable(
         ("time", "baseline_id", "uvw_label"),
         uvw_coordinates,
         None,
-        {"preferred_chunks": uvw_preferred_chunks}
+        {"preferred_chunks": uvw_preferred_chunks},
       )
 
       correlated_ds = self._build_correlated_dataset(
