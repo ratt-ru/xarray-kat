@@ -436,7 +436,7 @@ class DataTreeFactory:
       data_vars["UVW"] = Variable(
         ("time", "baseline_id", "uvw_label"),
         uvw_coordinates,
-        None,
+        {"type": "uvw", "units": "m", "frame": "fk5"},
         {"preferred_chunks": uvw_preferred_chunks},
       )
 
