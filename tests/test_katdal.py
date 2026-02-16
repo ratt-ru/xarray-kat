@@ -48,5 +48,6 @@ class TestKatdal:
     np.testing.assert_allclose(xarray_kat_flags, katdal_flags)
 
     xarray_kat_uvw = dt[children[0]].UVW.data
-    katdal_uvw = np.stack([ds.u, ds.v, ds.w], axis=2)[:, obs.corrprod_argsort]
+    # Flip katdal sign convention to match CASA
+    katdal_uvw = np.stack([-ds.u, -ds.v, -ds.w], axis=2)[:, obs.corrprod_argsort]
     np.testing.assert_allclose(xarray_kat_uvw, katdal_uvw[:, :: obs.npol])
