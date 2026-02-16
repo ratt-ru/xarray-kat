@@ -46,3 +46,7 @@ class TestKatdal:
     xarray_kat_flags = dt[children[0]].FLAG.data
     katdal_flags = reorder_katdal_data(ds.flags[:])
     np.testing.assert_allclose(xarray_kat_flags, katdal_flags)
+
+    xarray_kat_uvw = dt[children[0]].UVW.data
+    katdal_uvw = np.stack([ds.u, ds.v, ds.w], axis=2)[:, obs.corrprod_argsort]
+    np.testing.assert_allclose(xarray_kat_uvw, katdal_uvw[:, ::obs.npol])
