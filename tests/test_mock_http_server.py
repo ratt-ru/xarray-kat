@@ -12,6 +12,7 @@ from typing import TypedDict
 import numpy as np
 import pytest
 import xarray
+from katpoint import Target
 from pytest_httpserver import HTTPServer
 
 from tests.conftest import (
@@ -398,6 +399,33 @@ class TestXarrayKatIntegration:
       assert np.all(scan_config["target_name"] == ds.field_name.data)
       assert "VISIBILITY" in ds
       assert "time" in ds.dims
+
+  def test_field_and_source_xds_dataset(self, httpserver: HTTPServer, tmp_path):
+    """Test field_and_source_xds structure and values"""
+    from tests.conftest import DEFAULT_COORDS
+
+    obs = SyntheticObservation("1234567890", ntime=16, nfreq=16, nants=4)
+    obs.add_scan(range(0, 8), "track", "PKS1934")
+    obs.add_scan(range(8, 16), "scan", "3C286")
+    obs.save_to_directory(tmp_path)
+
+    token = setup_mock_archive_server(
+      httpserver, tmp_path, "1234567890", require_auth=True
+    )
+    base_url = httpserver.url_for("/")
+    rdb_url = f"{base_url}1234567890/1234567890_sdp_l0.full.rdb?token={token}"
+
+    child_fields = [sc["target_name"] for sc in obs.scan_configs]
+
+    dt = xarray.open_datatree(rdb_url, engine="xarray-kat")
+    for i, child_name in enumerate(dt.children):
+      fns = dt[f"{child_name}/field_and_source_base_xds"]
+      assert all(fns.sky_dir_label == ["ra", "dec"])
+      assert all([child_fields[i] == fn for fn in fns.field_name])
+      assert all([child_fields[i] == sn for sn in fns.source_name])
+      coords = DEFAULT_COORDS[child_fields[i]]
+      ra, dec = Target(f"{child_fields[i]}, radec, {coords[0]}, {coords[1]}").radec()
+      np.testing.assert_allclose(fns.FIELD_PHASE_CENTER_DIRECTION, [[ra, dec]])
 
   def test_antenna_xds_dataset(self, httpserver: HTTPServer, tmp_path):
     """Test antenna_xds dataset structure, values, and scan invariance."""
