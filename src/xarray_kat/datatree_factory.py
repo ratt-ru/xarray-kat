@@ -186,6 +186,24 @@ class DataTreeFactory:
       },
     )
 
+  def _build_field_and_source_dataset(self, target: Target) -> Dataset:
+    """Build a field and source dataset for a single scan"""
+    return Dataset(
+      data_vars={
+        "FIELD_PHASE_CENTER_DIRECTION": Variable(
+          ("field_name", "sky_dir_label"),
+          [list(target.radec())],
+          {"type": "sky_coord", "units": "rad", "frame": "fk5"},
+        ),
+      },
+      coords={
+        "field_name": Variable("field_name", [target.name]),
+        "sky_dir_label": Variable("sky_dir_label", ["ra", "dec"]),
+        "source_name": Variable("field_name", [target.name]),
+      },
+      attrs={"type": "field_and_source"},
+    )
+
   def _build_correlated_dataset(
     self,
     meta: ObservationMetadata,
@@ -449,8 +467,11 @@ class DataTreeFactory:
         data_vars,
       )
 
+      field_and_source_ds = self._build_field_and_source_dataset(target)
+
       correlated_node_name = f"{self._data_products.instance.name}_{i:03d}"
       tree[correlated_node_name] = correlated_ds
       tree[f"{correlated_node_name}/antenna_xds"] = antenna_ds
+      tree[f"{correlated_node_name}/field_and_source_base_xds"] = field_and_source_ds
 
     return tree
