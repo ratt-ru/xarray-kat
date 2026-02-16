@@ -401,6 +401,7 @@ class TestXarrayKatIntegration:
       assert "time" in ds.dims
 
   def test_field_and_source_xds_dataset(self, httpserver: HTTPServer, tmp_path):
+    """Test field_and_source_xds structure and values"""
     from tests.conftest import DEFAULT_COORDS
 
     obs = SyntheticObservation("1234567890", ntime=16, nfreq=16, nants=4)
@@ -419,11 +420,12 @@ class TestXarrayKatIntegration:
     dt = xarray.open_datatree(rdb_url, engine="xarray-kat")
     for i, child_name in enumerate(dt.children):
       fns = dt[f"{child_name}/field_and_source_base_xds"]
+      assert all(fns.sky_dir_label == ["ra", "dec"])
       assert all([child_fields[i] == fn for fn in fns.field_name])
       assert all([child_fields[i] == sn for sn in fns.source_name])
       coords = DEFAULT_COORDS[child_fields[i]]
       ra, dec = Target(f"{child_fields[i]}, radec, {coords[0]}, {coords[1]}").radec()
-      np.testing.assert_allclose(fns.FIELD_PHASE_CENTER_DIRECTION.values, [[ra, dec]])
+      np.testing.assert_allclose(fns.FIELD_PHASE_CENTER_DIRECTION, [[ra, dec]])
 
   def test_antenna_xds_dataset(self, httpserver: HTTPServer, tmp_path):
     """Test antenna_xds dataset structure, values, and scan invariance."""
