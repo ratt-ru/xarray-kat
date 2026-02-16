@@ -305,6 +305,10 @@ class DataTreeFactory:
     channel_width = bandwidth / nchan
     chan_freqs = (center_freq - (bandwidth / 2)) + np.arange(nchan) * channel_width
 
+    # Antenna metadata
+    antennas = self._data_products.instance.antennas
+    array_centre = antennas[0].array_reference_antenna()
+
     # Correlation Product metadata
     corrprods = telstate["bls_ordering"]
     autocorrs = Multiton(corrprod_to_autocorr, corrprods)
@@ -324,6 +328,11 @@ class DataTreeFactory:
 
     ant1_names = np.array(cp_ant1_names[:: len(upols)], dtype=str)
     ant2_names = np.array(cp_ant2_names[:: len(upols)], dtype=str)
+    concat_ant_names = np.concatenate([ant1_names, ant2_names])
+    _, inv = np.unique(concat_ant_names, return_inverse=True)
+    ant1_index = inv[len(inv) // 2 :]
+    ant2_index = inv[: len(inv) // 2]
+
     pols = np.array([HV_TO_LINEAR_MAP[p] for p in cp_pols[: len(upols)]], dtype=str)
 
     meta = ObservationMetadata(
@@ -402,7 +411,35 @@ class DataTreeFactory:
         ]
       }
 
+      # Pre-calculate UVW coordinates
       scan_timestamps = meta.timestamps[mask_index]
+      # Compute UVW coordinates for a chunk of timesteps.
+      uvw_ant = target.uvw(antennas, scan_timestamps, array_centre)
+      # Permute from axis, time, antenna to time, antenna, axis
+      uvw_ant = np.transpose(uvw_ant, (1, 2, 0))
+      # Compute baseline UVW coordinates from per-antenna coordinates.
+      # The sign convention matches `CASA`_, rather than the
+      # Measurement Set `definition`_.
+      # .. _CASA: https://casa.nrao.edu/Memos/CoordConvention.pdf
+      # .. _definition: https://casa.nrao.edu/Memos/229.html#SECTION00064000000000000000
+      uvw_coordinates = np.take(uvw_ant, ant1_index, axis=1) - np.take(
+        uvw_ant, ant2_index, axis=1
+      )
+
+      flag_p_chunks = data_vars["FLAG"].encoding["preferred_chunks"]
+      uvw_preferred_chunks = {
+        "time": flag_p_chunks["time"],
+        "baseline_id": flag_p_chunks["baseline_id"],
+        "uvw_label": 3,
+      }
+
+      data_vars["UVW"] = Variable(
+        ("time", "baseline_id", "uvw_label"),
+        uvw_coordinates,
+        {"type": "uvw", "units": "m", "frame": "fk5"},
+        {"preferred_chunks": uvw_preferred_chunks},
+      )
+
       correlated_ds = self._build_correlated_dataset(
         meta,
         scan_timestamps,

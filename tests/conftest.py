@@ -315,7 +315,7 @@ def add_sensor_data(
         target_str = f"{target_name}, radec, {ra}, {dec}"
 
       # Add sensors for each antenna
-      for ant in ant_names:
+      for a, ant in enumerate(ant_names):
         # Add activity sensor
         if ant not in ant_prev_state or ant_prev_state[ant] != state:
           telstate.add(
@@ -576,10 +576,13 @@ class SyntheticObservation:
       },
     }
 
+    from tests.meerkat_antennas import MEERKAT_ANTENNA_DESCRIPTIONS
+
     # Add per-antenna observer strings
     for ant in self.ant_names:
+      ant_desc = MEERKAT_ANTENNA_DESCRIPTIONS[ant]
       # Format: "name, latitude, longitude, altitude, diameter, delay"
-      telstate_dict[f"{ant}_observer"] = f"{ant}, -30.721, 21.411, 1035.0, 13.5, 0.0"
+      telstate_dict[f"{ant}_observer"] = ant_desc
 
     return telstate_dict
 
