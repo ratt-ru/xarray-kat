@@ -279,6 +279,21 @@ class DataTreeFactory:
       },
     )
 
+  def _build_data_group(self, field_and_source_name: str):
+    """Build the correlated dataset base data group"""
+    return {
+      "data_groups": {
+        "base": {
+          "correlated_data": "VISIBILITY",
+          "description": "Data group associated with the VISIBILITY DataArray",
+          "field_and_source": field_and_source_name,
+          "date": datetime.now(timezone.utc).isoformat(),
+          "flag": "FLAG",
+          "weight": "WEIGHT",
+        }
+      }
+    }
+
   def create(self) -> Dict[str, Dataset]:
     if self._chunks is not None:
       ArrayClass = DelayedBackendArray
@@ -458,6 +473,8 @@ class DataTreeFactory:
         {"preferred_chunks": uvw_preferred_chunks},
       )
 
+      # Create the correlated dataset
+      base_path = f"{self._data_products.instance.name}_{i:03d}"
       correlated_ds = self._build_correlated_dataset(
         meta,
         scan_timestamps,
@@ -467,11 +484,18 @@ class DataTreeFactory:
         data_vars,
       )
 
+      # Create the field and source dataset
       field_and_source_ds = self._build_field_and_source_dataset(target)
+      field_and_source_node_path = f"{base_path}/field_and_source_base_xds"
 
-      correlated_node_name = f"{self._data_products.instance.name}_{i:03d}"
-      tree[correlated_node_name] = correlated_ds
-      tree[f"{correlated_node_name}/antenna_xds"] = antenna_ds
-      tree[f"{correlated_node_name}/field_and_source_base_xds"] = field_and_source_ds
+      # Create the data on the correlated dataset
+      correlated_ds = correlated_ds.assign_attrs(
+        **self._build_data_group(field_and_source_node_path)
+      )
+
+      # Assign to appropriate nodes in the tree
+      tree[base_path] = correlated_ds
+      tree[f"{base_path}/antenna_xds"] = antenna_ds
+      tree[field_and_source_node_path] = field_and_source_ds
 
     return tree
