@@ -402,6 +402,7 @@ class TestXarrayKatIntegration:
   def test_antenna_xds_dataset(self, httpserver: HTTPServer, tmp_path):
     """Test antenna_xds dataset structure, values, and scan invariance."""
     from katpoint import Antenna as KatAntenna
+
     from tests.meerkat_antennas import MEERKAT_ANTENNA_DESCRIPTIONS as ANT_DESC
 
     obs = SyntheticObservation("1234567890", ntime=16, nfreq=16, nants=4)
