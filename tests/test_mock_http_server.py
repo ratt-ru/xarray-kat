@@ -402,6 +402,7 @@ class TestXarrayKatIntegration:
   def test_antenna_xds_dataset(self, httpserver: HTTPServer, tmp_path):
     """Test antenna_xds dataset structure, values, and scan invariance."""
     from katpoint import Antenna as KatAntenna
+    from tests.meerkat_antennas import MEERKAT_ANTENNA_DESCRIPTIONS as ANT_DESC
 
     obs = SyntheticObservation("1234567890", ntime=16, nfreq=16, nants=4)
     obs.add_scan(range(0, 8), "track", "PKS1934")
@@ -417,10 +418,7 @@ class TestXarrayKatIntegration:
     dt = xarray.open_datatree(rdb_url, engine="xarray-kat")
 
     # Build expected values from katpoint (same observer strings as fixture)
-    expected_antennas = [
-      KatAntenna(f"m{i:03d}, -30.721, 21.411, 1035.0, 13.5, 0.0")
-      for i in range(obs.nants)
-    ]
+    expected_antennas = [KatAntenna(ANT_DESC[f"m{i:03d}"]) for i in range(obs.nants)]
     expected_positions = np.array([a.position_ecef for a in expected_antennas])
     expected_names = [a.name for a in expected_antennas]
 
