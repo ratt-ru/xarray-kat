@@ -3,6 +3,7 @@ Changelog
 
 X.Y.Z (DD-MM-YYY)
 -----------------
+* Improve invalid ``van_vleck`` literal value exception (:pr:`50`)
 * Support choosing the UVW sign convention (:pr:`49`)
 * Add field and source dataset (:pr:`48`)
 * Add pre-computed UVW coordinates (:pr:`47`)
