@@ -5,7 +5,7 @@ import time
 import warnings
 from datetime import datetime, timezone
 from importlib.metadata import version as importlib_version
-from typing import TYPE_CHECKING, Dict, Iterable, NamedTuple, Set
+from typing import TYPE_CHECKING, Dict, Iterable, NamedTuple, Set, get_args
 
 import numpy as np
 import tensorstore as ts
@@ -21,7 +21,7 @@ from xarray_kat.katdal_types import corrprod_to_autocorr
 from xarray_kat.multiton import Multiton
 from xarray_kat.stores.vis_weight_flag_store_factory import VisWeightFlagFactory
 from xarray_kat.utils import corrprods_to_baseline_pols
-from xarray_kat.xkat_types import VanVleckLiteralType
+from xarray_kat.xkat_types import UvwSignConventionType, VanVleckLiteralType
 
 if TYPE_CHECKING:
   from katpoint import Target
@@ -79,6 +79,7 @@ class DataTreeFactory:
   _scan_states: Set[str]
   _applycal: str | Iterable[str]
   _van_vleck: VanVleckLiteralType
+  _uvw_sign_convention: UvwSignConventionType
   _endpoint: str
   _token: str | None
 
@@ -90,6 +91,7 @@ class DataTreeFactory:
     data_products: Multiton[TelstateDataProducts],
     applycal: str | Iterable[str],
     scan_states: Iterable[str],
+    uvw_sign_convention: UvwSignConventionType,
     van_vleck: VanVleckLiteralType,
     endpoint: str,
     token: str | None = None,
@@ -100,6 +102,7 @@ class DataTreeFactory:
     self._data_products = data_products
     self._applycal = applycal
     self._scan_states = set(scan_states)
+    self._uvw_sign_convention = uvw_sign_convention
     self._van_vleck = van_vleck
     self._endpoint = endpoint
     self._token = token
@@ -455,9 +458,16 @@ class DataTreeFactory:
       # Measurement Set `definition`_.
       # .. _CASA: https://casa.nrao.edu/Memos/CoordConvention.pdf
       # .. _definition: https://casa.nrao.edu/Memos/229.html#SECTION00064000000000000000
-      uvw_coordinates = np.take(uvw_ant, ant1_index, axis=1) - np.take(
-        uvw_ant, ant2_index, axis=1
-      )
+
+      if self._uvw_sign_convention == "fourier":
+        uvw = uvw_ant[:, ant2_index, :] - uvw_ant[:, ant1_index, :]
+      elif self._uvw_sign_convention == "casa":
+        uvw = uvw_ant[:, ant1_index, :] - uvw_ant[:, ant2_index, :]
+      else:
+        raise ValueError(
+          f"Invalid uvw sign convention {self._uvw_sign_convention} "
+          f"Should be one of {get_args(UvwSignConventionType)}"
+        )
 
       flag_p_chunks = data_vars["FLAG"].encoding["preferred_chunks"]
       uvw_preferred_chunks = {
@@ -468,7 +478,7 @@ class DataTreeFactory:
 
       data_vars["UVW"] = Variable(
         ("time", "baseline_id", "uvw_label"),
-        uvw_coordinates,
+        uvw,
         {"type": "uvw", "units": "m", "frame": "fk5"},
         {"preferred_chunks": uvw_preferred_chunks},
       )
