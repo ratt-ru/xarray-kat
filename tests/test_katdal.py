@@ -1,5 +1,6 @@
 import katdal
 import numpy as np
+import pytest
 import xarray
 from pytest_httpserver import HTTPServer
 
@@ -10,7 +11,10 @@ from tests.conftest import (
 
 
 class TestKatdal:
-  def test_katdal_mock_server_basic(self, httpserver: HTTPServer, tmp_path):
+  @pytest.mark.parametrize("uvw_sign_convention", ["fourier", "casa"])
+  def test_katdal_mock_server_basic(
+    self, httpserver: HTTPServer, uvw_sign_convention, tmp_path
+  ):
     """Tests that xarray-kat and katdal return the same data from the same datasource"""
     obs = SyntheticObservation("1234567890", ntime=8, nfreq=16, nants=4)
     obs.add_scan(range(0, 8), "track", "PKS1934")
@@ -24,7 +28,9 @@ class TestKatdal:
     rdb_url = f"{base_url}1234567890/1234567890_sdp_l0.full.rdb"
 
     ds = katdal.open(rdb_url)
-    dt = xarray.open_datatree(rdb_url, engine="xarray-kat")
+    dt = xarray.open_datatree(
+      rdb_url, engine="xarray-kat", uvw_sign_convention=uvw_sign_convention
+    )
 
     def reorder_katdal_data(data):
       return (
@@ -48,6 +54,7 @@ class TestKatdal:
     np.testing.assert_allclose(xarray_kat_flags, katdal_flags)
 
     xarray_kat_uvw = dt[children[0]].UVW.data
-    # Flip katdal sign convention to match CASA
-    katdal_uvw = np.stack([-ds.u, -ds.v, -ds.w], axis=2)[:, obs.corrprod_argsort]
+    katdal_uvw = np.stack([ds.u, ds.v, ds.w], axis=2)[:, obs.corrprod_argsort]
+    if uvw_sign_convention == "casa":
+      katdal_uvw = -katdal_uvw
     np.testing.assert_allclose(xarray_kat_uvw, katdal_uvw[:, :: obs.npol])
