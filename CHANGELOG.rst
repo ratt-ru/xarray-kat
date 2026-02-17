@@ -3,6 +3,7 @@ Changelog
 
 X.Y.Z (DD-MM-YYY)
 -----------------
+* Fix incorrect type hint export (:pr:`51`)
 * Improve invalid ``van_vleck`` literal value exception (:pr:`50`)
 * Support choosing the UVW sign convention (:pr:`49`)
 * Add field and source dataset (:pr:`48`)
