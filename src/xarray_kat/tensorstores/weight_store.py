@@ -73,7 +73,7 @@ def scaled_weight_store(
         cal_solutions[n] = calc_correction_per_corrprod(dump, slices[1], cal_params)
 
     weights = int_weights_future.result()
-    weights *= channel_weights_future.result()[..., None]
+    weights *= channel_weights_future.result()[..., np.newaxis]
 
     array[...] = weight_power_scale(
       vis_future.result(),

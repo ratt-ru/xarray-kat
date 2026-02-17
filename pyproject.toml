@@ -1,6 +1,6 @@
 [project]
 name = "xarray-kat"
-version = "0.1.0"
+version = "0.0.1"
 description = "Add your description here"
 readme = "README.rst"
 authors = [
@@ -26,6 +26,7 @@ testing = [
     "cloudpickle>=3.1.1",
     "dask>=2025.9.1",
     "dill>=0.4.0",
+    "katdal>=0.23",
     "pytest>=8.4.2",
     "pytest-httpserver>=1.1.0",
 ]
@@ -62,7 +63,7 @@ exclude = [
 # github_url = "https://github.com/<user or organization>/<project>/"
 
 [tool.tbump.version]
-current = "0.0.4"
+current = "0.0.1"
 
 # Example of a semver regexp.
 # Make sure this matches current_version before

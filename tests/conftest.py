@@ -30,6 +30,14 @@ from xarray_kat.utils import corrprods_to_baseline_pols
 logger = logging.getLogger(__name__)
 
 
+# Format: "name, radec, RA, DEC"
+DEFAULT_COORDS = {
+  "PKS1934": ("19:39:25.03", "-63:42:45.63"),
+  "3C286": ("13:31:08.29", "+30:30:33.0"),
+  "MockTarget": ("00:00:00.0", "+00:00:00.0"),
+}
+
+
 @pytest.fixture(autouse=True)
 def clear_multitons():
   with Multiton._INSTANCE_LOCK:
@@ -270,13 +278,7 @@ def add_sensor_data(
       if target_name is None:
         target_str = "Nothing, special"
       else:
-        # Format: "name, radec, RA, DEC"
-        coords = {
-          "PKS1934": ("19:39:25.03", "-63:42:45.63"),
-          "3C286": ("13:31:08.29", "+30:30:33.0"),
-          "MockTarget": ("00:00:00.0", "+00:00:00.0"),
-        }
-        ra, dec = coords.get(target_name, ("00:00:00.0", "+00:00:00.0"))
+        ra, dec = DEFAULT_COORDS.get(target_name, ("00:00:00.0", "+00:00:00.0"))
         target_str = f"{target_name}, radec, {ra}, {dec}"
 
       telstate.add("obs_target", target_str, ts=scan_timestamp, immutable=False)
@@ -306,16 +308,11 @@ def add_sensor_data(
       if target_name is None:
         target_str = "Nothing, special"
       else:
-        coords = {
-          "PKS1934": ("19:39:25.03", "-63:42:45.63"),
-          "3C286": ("13:31:08.29", "+30:30:33.0"),
-          "MockTarget": ("00:00:00.0", "+00:00:00.0"),
-        }
-        ra, dec = coords.get(target_name, ("00:00:00.0", "+00:00:00.0"))
+        ra, dec = DEFAULT_COORDS.get(target_name, ("00:00:00.0", "+00:00:00.0"))
         target_str = f"{target_name}, radec, {ra}, {dec}"
 
       # Add sensors for each antenna
-      for ant in ant_names:
+      for a, ant in enumerate(ant_names):
         # Add activity sensor
         if ant not in ant_prev_state or ant_prev_state[ant] != state:
           telstate.add(
@@ -359,12 +356,7 @@ def add_sensor_data(
         if target_name is None:
           target_str = "Nothing, special"
         else:
-          coords = {
-            "PKS1934": ("19:39:25.03", "-63:42:45.63"),
-            "3C286": ("13:31:08.29", "+30:30:33.0"),
-            "MockTarget": ("00:00:00.0", "+00:00:00.0"),
-          }
-          ra, dec = coords.get(target_name, ("00:00:00.0", "+00:00:00.0"))
+          ra, dec = DEFAULT_COORDS.get(target_name, ("00:00:00.0", "+00:00:00.0"))
           target_str = f"{target_name}, radec, {ra}, {dec}"
 
         telstate.add(
@@ -534,6 +526,10 @@ class SyntheticObservation:
       "bandwidth": self.bandwidth,
       "n_chans": self.nfreq,
       "sub_band": "l",  # L-band
+      # Modern MeerKAT datasets need weight scaling to be applied
+      # https://skaafrica.atlassian.net/browse/SR-1230
+      # https://github.com/ska-sa/katdal/pull/189
+      "need_weights_power_scale": True,
       # Antenna information
       "sub_pool_resources": ",".join(self.ant_names),
       "bls_ordering": self.bls_ordering,
@@ -572,10 +568,13 @@ class SyntheticObservation:
       },
     }
 
+    from tests.meerkat_antennas import MEERKAT_ANTENNA_DESCRIPTIONS
+
     # Add per-antenna observer strings
     for ant in self.ant_names:
+      ant_desc = MEERKAT_ANTENNA_DESCRIPTIONS[ant]
       # Format: "name, latitude, longitude, altitude, diameter, delay"
-      telstate_dict[f"{ant}_observer"] = f"{ant}, -30.721, 21.411, 1035.0, 13.5, 0.0"
+      telstate_dict[f"{ant}_observer"] = ant_desc
 
     return telstate_dict
 
@@ -612,6 +611,13 @@ class SyntheticObservation:
     )
 
     return telstate
+
+  @property
+  def corrprod_argsort(self) -> npt.NDArray:
+    """Returns an array that sorts the ``corrprod`` dimensions
+    into a canonical (baseline_id, polarization) ordering"""
+    corrprods = corrprods_to_baseline_pols(self.bls_ordering)
+    return np.array(sorted(range(len(corrprods)), key=lambda i: corrprods[i]))
 
   def generate_array_data(
     self, array_name: str, dtype: npt.DTypeLike, shape: Tuple[int, ...]
@@ -672,12 +678,9 @@ class SyntheticObservation:
       Synthetic data array with realistic values.
     """
     data = self.generate_array_data(array_name, dtype, shape)
-    corrprods = corrprods_to_baseline_pols(self.bls_ordering)
-    cp_argsort = np.array(sorted(range(len(corrprods)), key=lambda i: corrprods[i]))
-    data = data[..., cp_argsort].reshape(self.ntime, self.nfreq, self.nbl, self.npol)
-    return data.transpose(0, 2, 1, 3).reshape(
-      self.ntime, self.nbl, self.nfreq, self.npol
-    )
+    nt, nbl, nf, np = self.ntime, self.nbl, self.nfreq, self.npol
+    data = data[..., self.corrprod_argsort].reshape(nt, nf, nbl, np)
+    return data.transpose(0, 2, 1, 3).reshape(nt, nbl, nf, np)
 
   def _save_array_chunks(
     self, base_path: Path, prefix: str, array_name: str, array_meta: Dict

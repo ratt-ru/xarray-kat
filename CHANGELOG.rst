@@ -1,8 +1,15 @@
 Changelog
 =========
 
-X.Y.Z (DD-MM-YYY)
+0.0.1 (17-02-2026)
 -----------------
+* Fix incorrect type hint export (:pr:`51`)
+* Improve invalid ``van_vleck`` literal value exception (:pr:`50`)
+* Support choosing the UVW sign convention (:pr:`49`)
+* Add field and source dataset (:pr:`48`)
+* Add pre-computed UVW coordinates (:pr:`47`)
+* Test that xarray-kat and katdal produce the same data for the same data source (:pr:`45`)
+* Support ``antenna_xds`` dataset (:pr:`44`)
 * Test numerical correctness of transformation of archival data into MSv4 format (:pr:`43`)
 * Pass batches through ``virtual_chunked`` stores to HTTP KVStores (:pr:`37`)
 * Move generation of calibration solutions to top level tensorstores  (:pr:`37`)

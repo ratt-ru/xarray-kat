@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, get_args
 
 import numpy as np
 import numpy as npt
@@ -19,7 +19,7 @@ from xarray_kat.xkat_types import VanVleckLiteralType
 
 if TYPE_CHECKING:
   from xarray_kat.katdal_types import TelstateDataProducts
-  from xarray_kat.types import ArchiveArrayMetadata
+  from xarray_kat.xkat_types import ArchiveArrayMetadata
 
 log = logging.getLogger(__name__)
 
@@ -88,7 +88,10 @@ def base_visibility_virtual_store(
         LOOKUP_TABLES.instance.true,
       )
     elif van_vleck != "off":
-      raise ValueError(f"Invalid van_vleck value {van_vleck}")
+      raise ValueError(
+        f"Invalid van_vleck value {van_vleck} "
+        f"Should be one of {get_args(VanVleckLiteralType)}"
+      )
 
   return ts.virtual_chunked(
     read_function=read_chunk,
