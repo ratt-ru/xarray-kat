@@ -1,7 +1,7 @@
 Changelog
 =========
 
-X.Y.Z (DD-MM-YYY)
+0.0.1 (17-02-2026)
 -----------------
 * Fix incorrect type hint export (:pr:`51`)
 * Improve invalid ``van_vleck`` literal value exception (:pr:`50`)
