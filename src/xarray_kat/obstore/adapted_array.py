@@ -1,15 +1,18 @@
-from typing import Any, Dict, TypedDict, Tuple
+from threading import Lock
+from typing import Tuple, TypedDict, cast
+
 import numpy as np
 import numpy.typing as npt
 from xarray.backends.common import BackendArray
+from xarray.core.indexing import ExplicitIndexer, expanded_indexer, integer_types
 
-from xarray_kat.multiton import Multiton
 from xarray_kat.xkat_types import ArchiveArrayMetadata
 
 # A selection over (time, frequency, corrprod)
-DimRangeT = Tuple[slice, slice, slice]
+DimRangeType = Tuple[slice, slice, slice]
 
-class PreferredChunksT(TypedDict):
+
+class PreferredChunksType(TypedDict):
   time: int
   frequency: int
   corrprod: int
@@ -23,9 +26,9 @@ class VisFlagWeightData:
   flag: npt.NDArray
 
   def __init__(self):
-    vis = np.ones(10)
-    weight = np.ones(10)
-    flag = np.ones(10)
+    self.vis = np.ones(10)
+    self.weight = np.ones(10)
+    self.flag = np.ones(10)
 
 
 class VisFlagWeightGrid:
@@ -35,7 +38,7 @@ class VisFlagWeightGrid:
     weight_meta: ArchiveArrayMetadata,
     channel_weight_meta: ArchiveArrayMetadata,
     flag_meta: ArchiveArrayMetadata,
-    preferred_chunks: PreferredChunksT,
+    preferred_chunks: PreferredChunksType,
   ):
     self._vis_meta = vis_meta
     self._weight_meta = weight_meta
@@ -43,15 +46,18 @@ class VisFlagWeightGrid:
     self._flag_meta = flag_meta
     self._preferred_chunks = preferred_chunks
 
-    assert vis_meta.shape == weight_meta.shape == flag_meta.shape, "Archive Array shapes don't match"
-    assert vis_meta.shape[:2] == channel_weight_meta.shape
-    ntime, nfreq, ncorrprod = vis_meta.shape
+    if not (vis_meta.shape == weight_meta.shape == flag_meta.shape) or not (
+      vis_meta.shape[:2] == channel_weight_meta.shape
+    ):
+      raise ValueError("Archive Array shapes don't match")
+
+    ntime, nfreq, ncorrprod = self.shape = vis_meta.shape
 
     chunks = [
       vis_meta.chunks,
       weight_meta.chunks,
       channel_weight_meta.chunks + (-1,),
-      flag_meta.chunks
+      flag_meta.chunks,
     ]
 
     time_chunks, freq_chunks, cp_chunks = (max(c) for c in zip(*chunks))
@@ -59,23 +65,42 @@ class VisFlagWeightGrid:
     freq_chunks = max(preferred_chunks.get("frequency", freq_chunks), freq_chunks)
     cp_chunks = max(preferred_chunks.get("corrprod", cp_chunks), cp_chunks)
 
-    ntime, rem = divmod(ntime, time_chunks)
-    ntime += int(rem != 0)
-    nfreq, rem = divmod(nfreq, freq_chunks)
-    nfreq += int(rem != 0)
-    ncorrprod, rem = divmod(ncorrprod, cp_chunks)
-    ncorrprod += int(rem != 0)
+    ntime_chunks, rem = divmod(ntime, time_chunks)
+    ntime_chunks += int(rem != 0)
+    nfreq_chunks, rem = divmod(nfreq, freq_chunks)
+    nfreq_chunks += int(rem != 0)
+    ncorrprod_chunks, rem = divmod(ncorrprod, cp_chunks)
+    ncorrprod_chunks += int(rem != 0)
 
-    import time
-    start = time.time()
-    grid = np.asarray([VisFlagWeightData()] * (ntime*nfreq*ncorrprod)).reshape((ntime, nfreq, ncorrprod))
+    shape = (ntime_chunks, nfreq_chunks, ncorrprod_chunks)
+    nelements = ntime_chunks * nfreq_chunks * ncorrprod_chunks
+    grid = np.asarray([VisFlagWeightData()] * nelements).reshape(shape)  # noqa: F841
+    locks = np.asarray([Lock()] * nelements).reshape(shape)  # noqa: F841
 
+  def __getitem__(self, key):
+    ndim = len(self.shape)
+    indexer = (
+      expanded_indexer(key, ndim) if not isinstance(key, ExplicitIndexer) else key
+    )
 
+    for index, size in zip(indexer, self.shape):
+      if isinstance(index, integer_types):
+        if index < 0:
+          index += size
+      elif isinstance(index, slice):
+        index = slice(*index.indices(size))
+      elif isinstance(index, np.ndarray):
+        pass
+      else:
+        raise TypeError(f"{type(index)} was not an integer, slice or numpy array")
+
+    return indexer
 
 
 class VFWAdapter(BackendArray):
   def __init__(self, array: str):
     self.array = array
+
 
 if __name__ == "__main__":
   prefix = "12345-sdp-l0"
@@ -117,11 +142,12 @@ if __name__ == "__main__":
     name: ArchiveArrayMetadata(
       name,
       0,
-      dim_labels[:len(value["shape"])],
-      value["prefix"],
-      value["chunks"],
-      value["dtype"]
-    ) for name, value in chunk_info.items()
+      dim_labels[: len(value["shape"])],
+      cast(str, value["prefix"]),
+      cast(Tuple[Tuple[int, ...], ...], value["chunks"]),
+      cast(str, value["dtype"]),
+    )
+    for name, value in chunk_info.items()
   }
 
   grid = VisFlagWeightGrid(
@@ -129,4 +155,7 @@ if __name__ == "__main__":
     meta["weights"],
     meta["weights_channel"],
     meta["flags"],
-    {"time": 2, "frequency": 512, "corrprod": 4})
+    {"time": 2, "frequency": 512, "corrprod": 4},
+  )
+
+  print(grid[slice(5), np.arange(5)])
