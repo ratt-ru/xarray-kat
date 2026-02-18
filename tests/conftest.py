@@ -30,6 +30,14 @@ from xarray_kat.utils import corrprods_to_baseline_pols
 logger = logging.getLogger(__name__)
 
 
+# Format: "name, radec, RA, DEC"
+DEFAULT_COORDS = {
+  "PKS1934": ("19:39:25.03", "-63:42:45.63"),
+  "3C286": ("13:31:08.29", "+30:30:33.0"),
+  "MockTarget": ("00:00:00.0", "+00:00:00.0"),
+}
+
+
 @pytest.fixture(autouse=True)
 def clear_multitons():
   with Multiton._INSTANCE_LOCK:
@@ -270,13 +278,7 @@ def add_sensor_data(
       if target_name is None:
         target_str = "Nothing, special"
       else:
-        # Format: "name, radec, RA, DEC"
-        coords = {
-          "PKS1934": ("19:39:25.03", "-63:42:45.63"),
-          "3C286": ("13:31:08.29", "+30:30:33.0"),
-          "MockTarget": ("00:00:00.0", "+00:00:00.0"),
-        }
-        ra, dec = coords.get(target_name, ("00:00:00.0", "+00:00:00.0"))
+        ra, dec = DEFAULT_COORDS.get(target_name, ("00:00:00.0", "+00:00:00.0"))
         target_str = f"{target_name}, radec, {ra}, {dec}"
 
       telstate.add("obs_target", target_str, ts=scan_timestamp, immutable=False)
@@ -306,12 +308,7 @@ def add_sensor_data(
       if target_name is None:
         target_str = "Nothing, special"
       else:
-        coords = {
-          "PKS1934": ("19:39:25.03", "-63:42:45.63"),
-          "3C286": ("13:31:08.29", "+30:30:33.0"),
-          "MockTarget": ("00:00:00.0", "+00:00:00.0"),
-        }
-        ra, dec = coords.get(target_name, ("00:00:00.0", "+00:00:00.0"))
+        ra, dec = DEFAULT_COORDS.get(target_name, ("00:00:00.0", "+00:00:00.0"))
         target_str = f"{target_name}, radec, {ra}, {dec}"
 
       # Add sensors for each antenna
@@ -359,12 +356,7 @@ def add_sensor_data(
         if target_name is None:
           target_str = "Nothing, special"
         else:
-          coords = {
-            "PKS1934": ("19:39:25.03", "-63:42:45.63"),
-            "3C286": ("13:31:08.29", "+30:30:33.0"),
-            "MockTarget": ("00:00:00.0", "+00:00:00.0"),
-          }
-          ra, dec = coords.get(target_name, ("00:00:00.0", "+00:00:00.0"))
+          ra, dec = DEFAULT_COORDS.get(target_name, ("00:00:00.0", "+00:00:00.0"))
           target_str = f"{target_name}, radec, {ra}, {dec}"
 
         telstate.add(

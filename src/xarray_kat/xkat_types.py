@@ -6,6 +6,7 @@ import numpy as np
 import numpy.typing as npt
 
 VanVleckLiteralType = Literal["off", "autocorr"]
+UvwSignConventionType = Literal["fourier", "casa"]
 
 
 @dataclass(eq=True, unsafe_hash=True, slots=True, repr=True)

@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 from xarray_kat.datatree_factory import DataTreeFactory
 from xarray_kat.katdal_types import TelstateDataProducts, TelstateDataSource
 from xarray_kat.multiton import Multiton
-from xarray_kat.xkat_types import VanVleckLiteralType
+from xarray_kat.xkat_types import UvwSignConventionType, VanVleckLiteralType
 
 
 class KatStore(AbstractDataStore):
@@ -33,6 +33,7 @@ class KatEntryPoint(BackendEntrypoint):
     "scan_states",
     "capture_block_id",
     "stream_name",
+    "uvw_sign_convention",
     "van_vleck",
   ]
   description = "Opens a MeerKAT data source"
@@ -84,6 +85,7 @@ class KatEntryPoint(BackendEntrypoint):
     scan_states: Iterable[str] = ("scan", "track"),
     capture_block_id: str | None = None,
     stream_name: str | None = None,
+    uvw_sign_convention: UvwSignConventionType = "casa",
     van_vleck: VanVleckLiteralType = "off",
   ):
     group_dicts = self.open_groups_as_dict(
@@ -94,6 +96,7 @@ class KatEntryPoint(BackendEntrypoint):
       scan_states=scan_states,
       capture_block_id=capture_block_id,
       stream_name=stream_name,
+      uvw_sign_convention=uvw_sign_convention,
       van_vleck=van_vleck,
     )
     return DataTree.from_dict(group_dicts)
@@ -108,6 +111,7 @@ class KatEntryPoint(BackendEntrypoint):
     scan_states: Iterable[str] = ("scan", "track"),
     capture_block_id: str | None = None,
     stream_name: str | None = None,
+    uvw_sign_convention: UvwSignConventionType = "casa",
     van_vleck: VanVleckLiteralType = "off",
   ) -> Dict[str, Any]:
     url = str(filename_or_obj)
@@ -143,6 +147,7 @@ class KatEntryPoint(BackendEntrypoint):
       telstate_data_products,
       applycal,
       scan_states,
+      uvw_sign_convention,
       van_vleck,
       endpoint,
       token,
