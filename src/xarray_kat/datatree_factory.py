@@ -43,6 +43,12 @@ STATE_PARTICIPLE_MAP = {
   "track": "tracking",
 }
 
+TAG_TO_INTENT = {
+  "gaincal": "CALIBRATE_PHASE,CALIBRATE_AMPLI",
+  "bpcal": "CALIBRATE_BANDPASS,CALIBRATE_FLUX",
+  "target": "TARGET",
+}
+
 
 TELESCOPE_NAME = "MeerKat"
 
@@ -165,7 +171,7 @@ class DataTreeFactory:
         # 0 means that V is aligned to x (celestial North), but we are mapping H to x
         # so we have to correct with a -90 degree rotation.
         "ANTENNA_RECEPTOR_ANGLE": Variable(
-          ("antenna_name", "receptor_angle"),
+          ("antenna_name", "receptor_label"),
           np.full((len(antennas), 2), -np.pi / 2, np.float64),
           {"type": "quantity", "units": "rad"},
         ),
@@ -218,6 +224,7 @@ class DataTreeFactory:
   ) -> Dataset:
     """Build a correlated visibility Dataset for a single scan."""
     description = f"Scan {scan_index} {STATE_PARTICIPLE_MAP[state]} {target.name}"
+    scan_intents = [TAG_TO_INTENT[t] for t in target.tags if t in TAG_TO_INTENT]
 
     return Dataset(
       data_vars=data_vars,
@@ -237,7 +244,11 @@ class DataTreeFactory:
           },
         ),
         "field_name": Variable("time", [target.name] * len(scan_timestamps)),
-        "scan_name": Variable("time", [str(scan_index)] * len(scan_timestamps)),
+        "scan_name": Variable(
+          "time",
+          [str(scan_index)] * len(scan_timestamps),
+          {"coordinates": "scan_name", "scan_intents": scan_intents},
+        ),
         "frequency": Variable(
           "frequency",
           meta.chan_freqs,
@@ -245,6 +256,7 @@ class DataTreeFactory:
             "type": "spectral_coord",
             "observer": "TOPO",
             "units": "Hz",
+            "spectral_window_intents": ["<Unknown>"],
             "spectral_window_name": f"{meta.band}-band",
             "frequency_group_name": "none",
             "reference_frequency": {
@@ -263,6 +275,7 @@ class DataTreeFactory:
         "baseline_id": Variable("baseline_id", np.arange(len(meta.ant1_names))),
         "baseline_antenna1_name": Variable("baseline_id", meta.ant1_names),
         "baseline_antenna2_name": Variable("baseline_id", meta.ant2_names),
+        "uvw_label": Variable("uvw_label", ["u", "v", "w"]),
       },
       attrs={
         "creation_date": meta.start_iso,
@@ -270,10 +283,19 @@ class DataTreeFactory:
           "software_name": "xarray-kat",
           "version": importlib_version("xarray-kat"),
         },
+        "data_groups": {
+          "base": {
+            "correlated_data": "VISIBILITY",
+            "description": "Data group associated with the VISIBILITY DataArray",
+            "date": datetime.now(timezone.utc).isoformat(),
+            "flag": "FLAG",
+            "weight": "WEIGHT",
+          }
+        },
         "description": description,
         "observation_info": {
-          "observer": meta.observer,
-          "project_uid": meta.experiment_id,
+          "observer": [meta.observer],
+          "project_UID": meta.experiment_id,
           "release_date": meta.end_iso,
         },
         "schema_version": "4.0.0",
@@ -434,16 +456,16 @@ class DataTreeFactory:
       )
 
       data_vars = {
-        n: Variable(
-          a.dims,
-          WrappedArray(a),
-          None,
-          {"preferred_chunks": self.merge_chunks(n, a)},
+        names: Variable(
+          array.dims,
+          WrappedArray(array),
+          attrs,
+          {"preferred_chunks": self.merge_chunks(names, array)},
         )
-        for n, a in [
-          ("VISIBILITY", vis_array),
-          ("WEIGHT", weight_array),
-          ("FLAG", flag_array),
+        for names, array, attrs in [
+          ("VISIBILITY", vis_array, {"units": "Jy"}),
+          ("WEIGHT", weight_array, None),
+          ("FLAG", flag_array, None),
         ]
       }
 
