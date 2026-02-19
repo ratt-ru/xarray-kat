@@ -37,8 +37,21 @@ class VisFlagWeightData:
     self._weight = None
     self._flag = None
 
+  @property
+  def has_data(self) -> bool:
+    return self._vis is not None and self._weight is not None and self._flag is not None
+
 
 class VisFlagWeightGrid:
+  _vis_meta: ArchiveArrayMetadata
+  _weight_meta: ArchiveArrayMetadata
+  _channel_weight_meta: ArchiveArrayMetadata
+  _flag_meta: ArchiveArrayMetadata
+  _preferred_chunks: PreferredChunksType
+  _pool: ThreadPoolExecutor
+  _grid: npt.NDArray
+  _locks: npt.NDArray
+
   def __init__(
     self,
     vis_meta: ArchiveArrayMetadata,
@@ -84,10 +97,12 @@ class VisFlagWeightGrid:
 
     shape = (ntime_chunks, nfreq_chunks, ncorrprod_chunks)
     nelements = ntime_chunks * nfreq_chunks * ncorrprod_chunks
-    grid = np.asarray([VisFlagWeightData()] * nelements).reshape(shape)  # noqa: F841
-    locks = np.asarray([Lock()] * nelements).reshape(shape)  # noqa: F841
+    self._grid = np.asarray([VisFlagWeightData()] * nelements).reshape(shape)  # noqa: F841
+    self._locks = np.asarray([Lock()] * nelements).reshape(shape)  # noqa: F841
 
   def _chunk_indexer(self, key):
+    """Returns an indexer of the form (chunk_id, source_indexer, target_indexer)
+    for each dimension in the grid"""
     ndim = len(self.shape)
     indexer = (
       expanded_indexer(key, ndim) if not isinstance(key, ExplicitIndexer) else key
@@ -97,7 +112,12 @@ class VisFlagWeightGrid:
 
     for index, chunk, size in zip(indexer, self.chunks, self.shape):
       if isinstance(index, integer_types):
-        new_indexer.append([index if index >= 0 else index + size])
+        if index < 0:
+          index += size
+
+        chunk_index, source_index = divmod(index, chunk)
+
+        new_indexer.append([(chunk_index, source_index, index)])
       elif isinstance(index, slice):
         if index.step not in {None, 1}:
           raise NotImplementedError(
@@ -113,19 +133,34 @@ class VisFlagWeightGrid:
         start_chunk, start_rem = divmod(index_start, chunk)
         end_chunk, end_rem = divmod(index_stop, chunk)
 
-        # The index addresses a single chunk in any case
+        # The index addresses a single chunk
         if start_chunk == end_chunk:
-          new_indexer.append([index])
+          new_indexer.append([(start_chunk, slice(0, index_stop - index_start), index)])
         else:
+          # Multiple chunks case
+
+          # Add the start chunk
           new_index = [
-            slice(index_start, index_start + (chunk if start_rem == 0 else start_rem))
+            (
+              start_chunk,
+              slice(start_rem, chunk),
+              slice(index_start, (next_chunk := start_chunk + 1) * chunk),
+            )
           ]
 
-          for c in range(start_chunk + 1, end_chunk):
-            new_index.append(slice(c * chunk, c * chunk + chunk))
+          # Middle chunks
+          for c in range(next_chunk, end_chunk):
+            new_index.append((c, slice(0, chunk), slice(c * chunk, (c + 1) * chunk)))
 
           if end_rem > 0:
-            new_index.append(slice(index_stop - 1, index_stop + end_rem - 1))
+            # Final chunk
+            new_index.append(
+              (
+                end_chunk,
+                slice(0, end_rem),
+                slice(end_chunk * chunk, index_stop),
+              )
+            )
 
           new_indexer.append(new_index)
       elif isinstance(index, np.ndarray):
@@ -140,7 +175,10 @@ class VisFlagWeightGrid:
         # Compute target indices for each chunk
         target_indices = np.split(np.arange(argsort.size)[argsort], splits)
         new_indexer.append(
-          list(np.vstack(pair) for pair in zip(source_indices, target_indices))
+          (c[0].item(), si, ti)
+          for c, si, ti in zip(
+            np.split(index_chunks, splits), source_indices, target_indices
+          )
         )
       else:
         raise TypeError(f"{type(index)} was not an integer, slice or numpy array")
@@ -149,7 +187,31 @@ class VisFlagWeightGrid:
 
   def __getitem__(self, key):
     for index in product(*self._chunk_indexer(key)):
-      print(index)
+      chunk, source_indices, target_indices = zip(*index)
+      self._maybe_retrieve_chunk(chunk, source_indices, target_indices)
+
+  def _maybe_retrieve_chunk(self, chunk, source_index, target_index):
+    def archive_array_paths(chunk_extents, meta: ArchiveArrayMetadata) -> list[str]:
+      paths = []
+      chunk_starts = (
+        tuple(range(s, e, c)) for (s, e), c in zip(chunk_extents, meta.chunks)
+      )
+      for chunk_start in product(*chunk_starts):
+        path_parts = "_".join(f"{c:05d}" for c in chunk_start)
+        path = f"{meta.prefix}/{meta.name}/{path_parts}.npy"
+        paths.append(path)
+      return paths
+
+    with self._locks[chunk]:
+      if not cast(VisFlagWeightData, self._grid[chunk]).has_data:
+        chunk_extents = tuple((c * s, (c + 1) * s) for c, s in zip(chunk, self.chunks))
+
+        paths = []
+        paths.extend(archive_array_paths(chunk_extents, self._flag_meta))
+        paths.extend(archive_array_paths(chunk_extents, self._vis_meta))
+        paths.extend(archive_array_paths(chunk_extents, self._weight_meta))
+        paths.extend(archive_array_paths(chunk_extents, self._channel_weight_meta))
+        print(paths)
 
 
 class VFWAdapter(BackendArray):
@@ -164,33 +226,31 @@ if __name__ == "__main__":
   ntime = 100
   nfreq = 32
   ncorrprod = (7 * 7 // 2) * 4
-  chunks = normalize_chunks((2, 8, ncorrprod), (ntime, nfreq, ncorrprod))
-  time_chunks, freq_chunks, _ = chunks
 
   chunk_info = {
     "correlator_data": {
       "prefix": prefix,
       "dtype": "<c8",  # complex64 little-endian
       "shape": (ntime, nfreq, ncorrprod),
-      "chunks": (time_chunks, freq_chunks, (ncorrprod,)),
+      "chunks": normalize_chunks((1, 8, ncorrprod), (ntime, nfreq, ncorrprod)),
     },
     "flags": {
       "prefix": prefix,
       "dtype": "|u1",  # uint8
       "shape": (ntime, nfreq, ncorrprod),
-      "chunks": (time_chunks, freq_chunks, (ncorrprod,)),
+      "chunks": normalize_chunks((8, 8, ncorrprod), (ntime, nfreq, ncorrprod)),
     },
     "weights": {
       "prefix": prefix,
       "dtype": "|u1",  # uint8
       "shape": (ntime, nfreq, ncorrprod),
-      "chunks": (time_chunks, freq_chunks, (ncorrprod,)),
+      "chunks": normalize_chunks((8, 8, ncorrprod), (ntime, nfreq, ncorrprod)),
     },
     "weights_channel": {
       "prefix": prefix,
       "dtype": "<f4",  # float32 little-endian
       "shape": (ntime, nfreq),
-      "chunks": (time_chunks, freq_chunks),
+      "chunks": normalize_chunks((8, 8), (ntime, nfreq)),
     },
   }
 
@@ -216,4 +276,4 @@ if __name__ == "__main__":
     {"time": 2, "frequency": 8, "corrprod": 4},
   )
 
-  print(grid[slice(5), np.array([6, 11, 7, 7, 10, 11, 8, 12])])
+  print(grid[slice(10, 28), np.array([6, 11, 7, 7, 10, 11, 8, 12])])

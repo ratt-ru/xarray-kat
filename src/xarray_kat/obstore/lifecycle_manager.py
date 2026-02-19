@@ -1,15 +1,11 @@
-from dataclasses import dataclass
-from functools import reduce
+import weakref
 from itertools import pairwise, product
 from threading import Lock
 from typing import Any, Iterable
-import weakref
-
 
 import numpy as np
 import numpy.typing as npt
 from xarray.backends.common import BackendArray
-
 
 
 class LifeCycleManager:
@@ -39,6 +35,7 @@ class LifeCycleManager:
           # print(f"All fields accessed for {obj_id}. Releasing to GC.")
           del self._keep_alive[obj_id]
           del self._touch_log[obj_id]
+
 
 # The Global Manager
 _MANAGER = LifeCycleManager()
@@ -79,8 +76,8 @@ class VisFlagWeight:
     return self._flag
 
 
-vfw = weakref.WeakValueDictionary()
-vfw_lock = Lock()
+vfw: weakref.WeakValueDictionary = weakref.WeakValueDictionary()
+vfw_lock: Lock = Lock()
 
 
 class VFWArray(BackendArray):
@@ -88,6 +85,7 @@ class VFWArray(BackendArray):
     self.shape = shape
     self.dtype = dtype
     from xarray_kat.utils import normalize_chunks
+
     self.chunks = normalize_chunks(chunks, shape)
     ranges = [np.concatenate(([0], np.cumsum(c))).tolist() for c in self.chunks]
 
@@ -99,9 +97,10 @@ class VFWArray(BackendArray):
 
 if __name__ == "__main__":
   print(len(vfw))
+
   def func():
-    A = VFWArray((100, 16, 4), np.float64, ((11,), (5,), (3,)))
-    B = VFWArray((100, 16, 4), np.bool, ((11,), (5,), (3,)))
+    A = VFWArray((100, 16, 4), np.float64, ((11,), (5,), (3,)))  # noqa: F841
+    B = VFWArray((100, 16, 4), np.bool, ((11,), (5,), (3,)))  # noqa: F841
     print(len(vfw))
     D = next(iter(vfw.values()))
     D.vis
@@ -110,8 +109,11 @@ if __name__ == "__main__":
 
   func()
   print(len(vfw))
-  import gc; gc.collect()
+  import gc
+
+  gc.collect()
   print(len(vfw))
+
   def clear_fn():
     for v in vfw.values():
       v.vis
