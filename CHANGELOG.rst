@@ -3,6 +3,7 @@ Changelog
 
 0.0.2 (05-03-2026)
 ------------------
+* Re-enable Python 3.14 testing (:pr:`54`)
 * Guard xradio and katdal imports with ``pytest.importorskip``.
   These packages or their dependencies do not yet have Python 3.14 releases. (:pr:`53`)
 * Validate xarray-kat DataTree with xradio (:pr:`46`)
