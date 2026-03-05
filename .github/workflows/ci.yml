@@ -37,20 +37,20 @@ jobs:
           # Don't test on macos-14 in PR's
           - is_main_or_release: false
             os: "macos-14"
-          # Don't test on 3.11 - 3.13 in PR's
+          # Don't test on 3.11, 3.12 - 3.14 in PR's
           - is_main_or_release: false
             python-version: "3.11"
           - is_main_or_release: false
             python-version: "3.12"
           - is_main_or_release: false
-            python-version: "3.13"
-          # Don't test on macos on 3.10 - 3.13 in PRs
+            python-version: "3.14"
+          # Don't test on macos on 3.11, 3.12 - 3.14 in PRs
           - os: "macos-15"
             python-version: "3.11"
           - os: "macos-15"
             python-version: "3.12"
           - os: "macos-15"
-            python-version: "3.13"
+            python-version: "3.14"
 
 
     steps:
