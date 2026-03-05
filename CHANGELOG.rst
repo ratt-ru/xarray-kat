@@ -1,6 +1,10 @@
 Changelog
 =========
 
+X.Y.Z (DD-MM-YYYY)
+------------------
+* Validate xarray-kat DataTree with xradio (:pr:`46`)
+
 0.0.1 (17-02-2026)
 -----------------
 * Fix incorrect type hint export (:pr:`51`)
