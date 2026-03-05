@@ -1,4 +1,3 @@
-import katdal
 import numpy as np
 import pytest
 import xarray
@@ -8,6 +7,8 @@ from tests.conftest import (
   SyntheticObservation,
   setup_mock_archive_server,
 )
+
+katdal = pytest.importorskip("katdal")
 
 
 class TestKatdal:
