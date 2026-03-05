@@ -12,7 +12,6 @@ dependencies = [
     "katsdptelstate[rdb]>=1.0.0",
     "tensorstore>=0.1.81",
     "xarray>=2025.9.1",
-    "xradio>=1.1.2",
 ]
 
 [project.entry-points."xarray.backends"]
@@ -29,6 +28,7 @@ testing = [
     "katdal>=0.23",
     "pytest>=8.4.2",
     "pytest-httpserver>=1.1.0",
+    "xradio>=1.1.2; python_version >= '3.11' and python_version < '3.14'",
 ]
 numba = [
     "numba>=0.62.1",
