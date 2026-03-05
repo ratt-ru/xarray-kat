@@ -1,23 +1,18 @@
-import sys
-
 import pytest
 import xarray
-import xradio  # noqa: F401
-import xradio.measurement_set  # noqa: F401 Required to register types for check_datatree
 from pytest_httpserver import HTTPServer
-from xradio.schema.check import check_datatree
 
 from tests.conftest import (
   SyntheticObservation,
   setup_mock_archive_server,
 )
 
+# Required to register types for check_datatree
+pytest.importorskip("xradio.measurement_set")
+check_datatree = pytest.importorskip("xradio.schema.check").check_datatree
+
 
 class TestXRadioValidation:
-  @pytest.mark.skipif(
-    sys.version_info.major != 3 or sys.version_info.minor > 13,
-    reason="no xradio > 3.13",
-  )
   def test_validation(self, httpserver: HTTPServer, tmp_path):
     """Tests that datatrees produced by xarray-kat are validated by the
     xradio schema checker"""
