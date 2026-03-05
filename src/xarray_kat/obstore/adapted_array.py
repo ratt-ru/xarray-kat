@@ -13,8 +13,8 @@ from xarray.core.indexing import (
   integer_types,
 )
 
-from xarray_kat.xkat_types import ArchiveArrayMetadata
 from tests.conftest import SyntheticObservation, setup_mock_archive_server
+from xarray_kat.xkat_types import ArchiveArrayMetadata
 
 # A selection over (time, frequency, corrprod)
 DimRangeType = Tuple[slice, slice, slice]
