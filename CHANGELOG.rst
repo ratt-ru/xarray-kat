@@ -1,7 +1,7 @@
 Changelog
 =========
 
-X.Y.Z (DD-MM-YYYY)
+0.0.2 (05-03-2026)
 ------------------
 * Validate xarray-kat DataTree with xradio (:pr:`46`)
 * Test against Python 3.13 in Pull Requests (:pr:`46`)
