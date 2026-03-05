@@ -46,10 +46,13 @@ jobs:
             python-version: "3.14"
           # Don't test on macos on 3.11, 3.12 and 3.14 in PRs
           - os: "macos-15"
+            is_main_or_release: false
             python-version: "3.11"
           - os: "macos-15"
+            is_main_or_release: false
             python-version: "3.12"
           - os: "macos-15"
+            is_main_or_release: false
             python-version: "3.14"
 
 
