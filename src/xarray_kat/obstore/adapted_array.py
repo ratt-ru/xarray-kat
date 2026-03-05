@@ -14,6 +14,7 @@ from xarray.core.indexing import (
 )
 
 from xarray_kat.xkat_types import ArchiveArrayMetadata
+from tests.conftest import SyntheticObservation, setup_mock_archive_server
 
 # A selection over (time, frequency, corrprod)
 DimRangeType = Tuple[slice, slice, slice]
@@ -275,5 +276,19 @@ if __name__ == "__main__":
     meta["flags"],
     {"time": 2, "frequency": 8, "corrprod": 4},
   )
+
+  obs = SyntheticObservation("1234567890", ntime=8, nfreq=16, nants=4)
+  obs.add_scan(range(0, 8), "track", "PKS1934")
+  obs.save_to_directory("/tmp/synthobs")
+
+  token = setup_mock_archive_server(
+    httpserver, tmp_path, "1234567890", require_auth=False
+  )
+
+  # Token should be None when auth not required
+  assert token is None
+
+  # RDB file should be accessible
+  rdb_url = httpserver.url_for("/1234567890/1234567890_sdp_l0.full.rdb")
 
   print(grid[slice(10, 28), np.array([6, 11, 7, 7, 10, 11, 8, 12])])
