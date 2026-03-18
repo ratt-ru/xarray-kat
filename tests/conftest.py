@@ -369,8 +369,14 @@ class SyntheticObservation:
     # Generate correlation products (baseline-polarization pairs)
     self.bls_ordering = self._generate_bls_ordering()
 
+    # Timing
+    self.sync_time = 1234567890.0
+
     # Scan configurations (can be added via add_scan)
     self.scan_configs: List[Dict] = []
+
+    # Calibration solutions (can be enabled via add_calibration_solutions)
+    self.include_calibration = False
 
     # Default chunking (can be customized)
     self.time_chunk_size = 2
@@ -394,6 +400,83 @@ class SyntheticObservation:
               [f"{self.ant_names[i]}{pol1}", f"{self.ant_names[j]}{pol2}"]
             )
     return bls_ordering
+
+  def add_calibration_solutions(self) -> None:
+    """Enable synthetic calibration solutions for this observation.
+
+    When called, calibration metadata and per-dump gain solutions will be
+    written into the telstate. This allows TelstateDataProducts to find
+    a non-None calibration_params when constructed with applycal="all".
+
+    The solutions use unit-amplitude complex gains with random phases so
+    that the correction is well-defined but non-trivial.
+
+    Example:
+      >>> obs = SyntheticObservation("1234567890", ntime=10, nfreq=16, nants=4)
+      >>> obs.add_scan(range(0, 10), "track", "PKS1934")
+      >>> obs.add_calibration_solutions()
+      >>> obs.save_to_directory(Path("/tmp/mock_archive"))
+    """
+    self.include_calibration = True
+
+  def _add_cal_data(self, telstate: katsdptelstate.TelescopeState) -> None:
+    """Write synthetic calibration solutions into *telstate*.
+
+    Adds the minimum set of keys required by katdal's applycal machinery:
+    - Global immutable keys describing the "cal" stream (antlist, pol_ordering,
+      spectral info, product_B_parts).
+    - Per-capture-block mutable sensor keys for G, K, and B0 products.
+
+    All solutions use unit amplitude with random phases (seeded for
+    reproducibility), so they are invertible but non-trivial.
+    """
+    n_pols = 2  # 'h' and 'v'
+    n_ants = self.nants
+
+    # Global immutable cal-stream metadata
+    telstate.add("cal_stream_type", "sdp.cal", immutable=True)
+    telstate.add("cal_antlist", self.ant_names, immutable=True)
+    telstate.add("cal_pol_ordering", ["h", "v"], immutable=True)
+    telstate.add("cal_center_freq", self.center_freq, immutable=True)
+    telstate.add("cal_n_chans", self.nfreq, immutable=True)
+    telstate.add("cal_bandwidth", self.bandwidth, immutable=True)
+    # B_parts=1 tells katdal to look for cal_product_B0 (split-cal format)
+    telstate.add("cal_product_B_parts", 1, immutable=True)
+
+    # Place the solution one integration before the first dump so it covers
+    # all dumps (sensor interpolation is zeroth-order / held constant).
+    sol_timestamp = self.sync_time - self.int_time
+
+    rng = np.random.default_rng(42)
+
+    # G (gain): shape (n_pols, n_ants), complex64, unit amplitude
+    phases_G = rng.uniform(-np.pi, np.pi, (n_pols, n_ants))
+    gains_G = np.exp(1j * phases_G).astype(np.complex64)
+    telstate.add(
+      f"{self.capture_block_id}_cal_product_G",
+      gains_G,
+      ts=sol_timestamp,
+      immutable=False,
+    )
+
+    # K (delay): shape (n_pols, n_ants), float32, small delays in seconds
+    delays_K = rng.uniform(-1e-11, 1e-11, (n_pols, n_ants)).astype(np.float32)
+    telstate.add(
+      f"{self.capture_block_id}_cal_product_K",
+      delays_K,
+      ts=sol_timestamp,
+      immutable=False,
+    )
+
+    # B0 (bandpass): shape (n_chans, n_pols, n_ants), complex64, unit amplitude
+    phases_B = rng.uniform(-np.pi, np.pi, (self.nfreq, n_pols, n_ants))
+    gains_B = np.exp(1j * phases_B).astype(np.complex64)
+    telstate.add(
+      f"{self.capture_block_id}_cal_product_B0",
+      gains_B,
+      ts=sol_timestamp,
+      immutable=False,
+    )
 
   def add_scan(
     self, indices: range | List[int], state: str, target: str | None
@@ -448,7 +531,7 @@ class SyntheticObservation:
       "stream_type": "sdp.vis",
       "sub_product": "sdp_l0",
       # Timing information
-      "sync_time": 1234567890.0,  # Mock epoch time
+      "sync_time": self.sync_time,
       "first_timestamp": 0.0,
       "int_time": self.int_time,
       # Frequency information
@@ -539,6 +622,9 @@ class SyntheticObservation:
       self.scan_configs,
       ant_names=self.ant_names,
     )
+
+    if self.include_calibration:
+      self._add_cal_data(telstate)
 
     return telstate
 
