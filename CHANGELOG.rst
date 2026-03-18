@@ -3,7 +3,8 @@ Changelog
 
 X.Y.Z (DD-MM-YYYY)
 ------------------
-* Add calibration solutions to SyntheticObservation (:pr:`55`)
+* Correct application of calibration solutions (:pr:`55`)
+* Add calibration solutions to SyntheticObservation. (:pr:`55`)
 
 0.0.2 (05-03-2026)
 ------------------
