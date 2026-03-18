@@ -46,7 +46,7 @@ def final_flag_store(
     array[:] = flags_future.result()
 
     if cal_solutions is not None:
-      apply_flags_correction(array, cal_solutions)
+      array[:] = apply_flags_correction(array, cal_solutions)
 
   return ts.virtual_chunked(
     read_function=read_chunk,

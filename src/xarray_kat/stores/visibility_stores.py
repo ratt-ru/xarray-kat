@@ -137,7 +137,7 @@ def final_visibility_virtual_store(
 
     # Possibly apply calibration solutions
     if cal_solutions is not None:
-      apply_vis_correction(array, cal_solutions)
+      array[:] = apply_vis_correction(array, cal_solutions)
 
   return ts.virtual_chunked(
     read_function=read_chunk,

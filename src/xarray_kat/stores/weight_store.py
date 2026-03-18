@@ -85,7 +85,7 @@ def scaled_weight_store(
     )
 
     if cal_solutions is not None:
-      apply_weights_correction(array, cal_solutions)
+      array[:] = apply_weights_correction(array, cal_solutions)
 
   return ts.virtual_chunked(
     read_function=read_chunk,
