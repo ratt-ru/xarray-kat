@@ -4,7 +4,6 @@ import numpy as np
 import pytest
 
 from xarray_kat.third_party.vendored.katdal.applycal_minimal import (
-  POSTPROC,
   nb_apply_flags_correction,
   nb_apply_vis_correction,
   nb_apply_weights_correction,
@@ -12,137 +11,142 @@ from xarray_kat.third_party.vendored.katdal.applycal_minimal import (
   np_apply_vis_correction,
   np_apply_weights_correction,
 )
+from xarray_kat.third_party.vendored.katdal.flags import (
+  NAMES as FLAG_NAMES,
+)
+from xarray_kat.third_party.vendored.katdal.flags import (
+  POSTPROC,
+)
 
 numba = pytest.importorskip("numba")
 
-RNG = np.random.default_rng(42)
 SHAPE = (4, 8, 10)  # (ntime, nfreq, ncorrprod)
 
 
-def make_vis(shape=SHAPE):
-  re = RNG.standard_normal(shape).astype(np.float32)
-  im = RNG.standard_normal(shape).astype(np.float32)
-  return (re + 1j * im).astype(np.complex64)
-
-
-def make_weights(shape=SHAPE):
-  return RNG.uniform(0, 1, shape).astype(np.float32)
-
-
-def make_flags(shape=SHAPE):
-  return RNG.integers(0, 2, shape, dtype=np.uint8)
-
-
-def make_correction(shape=SHAPE, nan_fraction=0.1):
-  """Complex correction array with some NaN entries to simulate flagged solutions."""
-  re = RNG.standard_normal(shape).astype(np.float32)
-  im = RNG.standard_normal(shape).astype(np.float32)
+def _make_correction(nan_fraction):
+  rng = np.random.default_rng(0)
+  re = rng.standard_normal(SHAPE).astype(np.float32)
+  im = rng.standard_normal(SHAPE).astype(np.float32)
   correction = (re + 1j * im).astype(np.complex64)
-  nan_mask = RNG.random(shape) < nan_fraction
-  correction[nan_mask] = np.nan + 1j * np.nan
+  correction[rng.random(SHAPE) < nan_fraction] = np.nan + 1j * np.nan
   return correction
 
 
+@pytest.fixture
+def vis():
+  rng = np.random.default_rng(1)
+  re = rng.standard_normal(SHAPE).astype(np.float32)
+  im = rng.standard_normal(SHAPE).astype(np.float32)
+  return (re + 1j * im).astype(np.complex64)
+
+
+@pytest.fixture
+def weights():
+  return np.random.default_rng(2).uniform(0, 1, SHAPE).astype(np.float32)
+
+
+@pytest.fixture
+def flags():
+  return np.random.default_rng(3).integers(0, len(FLAG_NAMES), SHAPE, dtype=np.uint8)
+
+
+@pytest.fixture
+def correction_no_nans():
+  return _make_correction(nan_fraction=0.0)
+
+
+@pytest.fixture
+def correction_some_nans():
+  return _make_correction(nan_fraction=0.2)
+
+
+@pytest.fixture
+def correction_sparse_nans():
+  return _make_correction(nan_fraction=0.3)
+
+
+@pytest.fixture
+def correction_all_nans():
+  return np.full(SHAPE, np.nan + 1j * np.nan, dtype=np.complex64)
+
+
 class TestApplyVisCorrection:
-  def test_no_nans(self):
-    data = make_vis()
-    correction = make_correction(nan_fraction=0.0)
+  def test_no_nans(self, vis, correction_no_nans):
     np.testing.assert_allclose(
-      np_apply_vis_correction(data, correction),
-      nb_apply_vis_correction(data, correction),
+      np_apply_vis_correction(vis, correction_no_nans),
+      nb_apply_vis_correction(vis, correction_no_nans),
       rtol=1e-6,
     )
 
-  def test_some_nans(self):
-    data = make_vis()
-    correction = make_correction(nan_fraction=0.2)
+  def test_some_nans(self, vis, correction_some_nans):
     np.testing.assert_allclose(
-      np_apply_vis_correction(data, correction),
-      nb_apply_vis_correction(data, correction),
+      np_apply_vis_correction(vis, correction_some_nans),
+      nb_apply_vis_correction(vis, correction_some_nans),
       rtol=1e-6,
     )
 
-  def test_all_nans(self):
-    data = make_vis()
-    correction = np.full(SHAPE, np.nan + 1j * np.nan, dtype=np.complex64)
+  def test_all_nans(self, vis, correction_all_nans):
     np.testing.assert_array_equal(
-      np_apply_vis_correction(data, correction),
-      nb_apply_vis_correction(data, correction),
+      np_apply_vis_correction(vis, correction_all_nans),
+      nb_apply_vis_correction(vis, correction_all_nans),
     )
 
-  def test_nan_entries_unchanged(self):
+  def test_nan_entries_unchanged(self, vis, correction_sparse_nans):
     """Where correction is NaN the original data value must be preserved."""
-    data = make_vis()
-    correction = make_correction(nan_fraction=0.3)
-    result = np_apply_vis_correction(data, correction)
-    nan_mask = np.isnan(correction)
-    np.testing.assert_array_equal(result[nan_mask], data[nan_mask])
+    result = np_apply_vis_correction(vis, correction_sparse_nans)
+    nan_mask = np.isnan(correction_sparse_nans)
+    np.testing.assert_array_equal(result[nan_mask], vis[nan_mask])
 
 
 class TestApplyWeightsCorrection:
-  def test_no_nans(self):
-    data = make_weights()
-    correction = make_correction(nan_fraction=0.0)
+  def test_no_nans(self, weights, correction_no_nans):
     np.testing.assert_array_equal(
-      np_apply_weights_correction(data, correction),
-      nb_apply_weights_correction(data, correction),
+      np_apply_weights_correction(weights, correction_no_nans),
+      nb_apply_weights_correction(weights, correction_no_nans),
     )
 
-  def test_some_nans(self):
-    data = make_weights()
-    correction = make_correction(nan_fraction=0.2)
+  def test_some_nans(self, weights, correction_some_nans):
     np.testing.assert_array_equal(
-      np_apply_weights_correction(data, correction),
-      nb_apply_weights_correction(data, correction),
+      np_apply_weights_correction(weights, correction_some_nans),
+      nb_apply_weights_correction(weights, correction_some_nans),
     )
 
-  def test_all_nans(self):
-    data = make_weights()
-    correction = np.full(SHAPE, np.nan + 1j * np.nan, dtype=np.complex64)
+  def test_all_nans(self, weights, correction_all_nans):
     np.testing.assert_array_equal(
-      np_apply_weights_correction(data, correction),
-      nb_apply_weights_correction(data, correction),
+      np_apply_weights_correction(weights, correction_all_nans),
+      nb_apply_weights_correction(weights, correction_all_nans),
     )
 
-  def test_nan_entries_zeroed(self):
+  def test_nan_entries_zeroed(self, weights, correction_sparse_nans):
     """Where correction is NaN the weight must be zeroed."""
-    data = make_weights()
-    correction = make_correction(nan_fraction=0.3)
-    result = np_apply_weights_correction(data, correction)
-    nan_mask = np.isnan(correction.real**2 + correction.imag**2)
+    result = np_apply_weights_correction(weights, correction_sparse_nans)
+    nan_mask = np.isnan(correction_sparse_nans.real**2 + correction_sparse_nans.imag**2)
     assert np.all(result[nan_mask] == 0)
 
 
 class TestApplyFlagsCorrection:
-  def test_no_nans(self):
-    data = make_flags()
-    correction = make_correction(nan_fraction=0.0)
+  def test_no_nans(self, flags, correction_no_nans):
     np.testing.assert_array_equal(
-      np_apply_flags_correction(data, correction),
-      nb_apply_flags_correction(data, correction),
+      np_apply_flags_correction(flags, correction_no_nans),
+      nb_apply_flags_correction(flags, correction_no_nans),
     )
 
-  def test_some_nans(self):
-    data = make_flags()
-    correction = make_correction(nan_fraction=0.2)
+  def test_some_nans(self, flags, correction_some_nans):
     np.testing.assert_array_equal(
-      np_apply_flags_correction(data, correction),
-      nb_apply_flags_correction(data, correction),
+      np_apply_flags_correction(flags, correction_some_nans),
+      nb_apply_flags_correction(flags, correction_some_nans),
     )
 
-  def test_all_nans(self):
-    data = make_flags()
-    correction = np.full(SHAPE, np.nan + 1j * np.nan, dtype=np.complex64)
+  def test_all_nans(self, flags, correction_all_nans):
     np.testing.assert_array_equal(
-      np_apply_flags_correction(data, correction),
-      nb_apply_flags_correction(data, correction),
+      np_apply_flags_correction(flags, correction_all_nans),
+      nb_apply_flags_correction(flags, correction_all_nans),
     )
 
-  def test_nan_entries_set_postproc(self):
+  def test_nan_entries_set_postproc(self, correction_sparse_nans):
     """Where correction is NaN the POSTPROC flag bit must be set."""
     data = np.zeros(SHAPE, dtype=np.uint8)
-    correction = make_correction(nan_fraction=0.3)
-    result = np_apply_flags_correction(data, correction)
-    nan_mask = np.isnan(correction)
+    result = np_apply_flags_correction(data, correction_sparse_nans)
+    nan_mask = np.isnan(correction_sparse_nans)
     assert np.all(result[nan_mask] & POSTPROC)
     assert np.all(result[~nan_mask] == 0)
