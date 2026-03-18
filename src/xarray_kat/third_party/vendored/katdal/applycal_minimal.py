@@ -683,7 +683,7 @@ if not numba:
     """Clean up and apply `correction` to visibility data in `data`."""
     out = np.copy(data)
     mask = np.isnan(correction)
-    out[mask] *= correction[mask]
+    out[~mask] *= correction[~mask]
     return out
 
   def apply_weights_correction(data, correction):
@@ -691,8 +691,8 @@ if not numba:
     out = np.copy(data)
     correction_sqrd = correction.real**2 + correction.imag**2
     mask = np.isnan(correction_sqrd)
-    out[mask] /= correction_sqrd[mask]
-    out[~mask] = 0
+    out[~mask] /= correction_sqrd[~mask]
+    out[mask] = 0
     return out
 
   def apply_flags_correction(data, correction):
