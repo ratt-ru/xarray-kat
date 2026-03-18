@@ -3,6 +3,7 @@ Changelog
 
 X.Y.Z (DD-MM-YYYY)
 ------------------
+* Test application of Van Vleck corrections (:pr:`57`)
 * Add numba to optional testing dependencies (:pr:`56`)
 * Correct application of calibration solutions (:pr:`55`)
 * Add calibration solutions to SyntheticObservation. (:pr:`55`)
