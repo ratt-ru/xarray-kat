@@ -1,6 +1,10 @@
 Changelog
 =========
 
+X.Y.Z (DD-MM-YYYY)
+------------------
+* Add calibration solutions to SyntheticObservation (:pr:`55`)
+
 0.0.2 (05-03-2026)
 ------------------
 * Re-enable Python 3.14 testing (:pr:`54`)
