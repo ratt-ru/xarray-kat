@@ -1,7 +1,7 @@
 Changelog
 =========
 
-X.Y.Z (DD-MM-YYYY)
+0.0.3 (18-03-2026)
 ------------------
 * Update README.rst and document open_datatree (:pr:`58`)
 * Test application of Van Vleck corrections (:pr:`57`)
