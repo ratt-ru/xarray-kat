@@ -468,24 +468,28 @@ class SyntheticObservation:
         immutable=False,
       )
 
-    # K (delay): shape (n_pols, n_ants), float32, small delays in seconds
-    delays_K = rng.uniform(-1e-11, 1e-11, (n_pols, n_ants)).astype(np.float32)
-    telstate.add(
-      f"{self.capture_block_id}_cal_product_K",
-      delays_K,
-      ts=sol_timestamp,
-      immutable=False,
-    )
+    # K (delay): shape (n_pols, n_ants), float32, small delays in seconds.
+    # Two solutions (step function in time — no interpolation, zeroth-order hold).
+    for ts in (first_dump_ts, mid_dump_ts):
+      delays_K = rng.uniform(-1e-11, 1e-11, (n_pols, n_ants)).astype(np.float32)
+      telstate.add(
+        f"{self.capture_block_id}_cal_product_K",
+        delays_K,
+        ts=ts,
+        immutable=False,
+      )
 
-    # B0 (bandpass): shape (n_chans, n_pols, n_ants), complex64, unit amplitude
-    phases_B = rng.uniform(-np.pi, np.pi, (n_freqs, n_pols, n_ants))
-    gains_B = np.exp(1j * phases_B).astype(np.complex64)
-    telstate.add(
-      f"{self.capture_block_id}_cal_product_B0",
-      gains_B,
-      ts=sol_timestamp,
-      immutable=False,
-    )
+    # B0 (bandpass): shape (n_chans, n_pols, n_ants), complex64, unit amplitude.
+    # Two solutions (step function in time — no interpolation, zeroth-order hold).
+    for ts in (first_dump_ts, mid_dump_ts):
+      phases_B = rng.uniform(-np.pi, np.pi, (n_freqs, n_pols, n_ants))
+      gains_B = np.exp(1j * phases_B).astype(np.complex64)
+      telstate.add(
+        f"{self.capture_block_id}_cal_product_B0",
+        gains_B,
+        ts=ts,
+        immutable=False,
+      )
 
   def add_scan(
     self, indices: range | List[int], state: str, target: str | None
