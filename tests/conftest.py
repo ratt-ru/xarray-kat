@@ -433,12 +433,16 @@ class SyntheticObservation:
     n_pols = 2  # 'h' and 'v'
     n_ants = self.nants
 
+    # bandpass calibration solutions are frequently
+    # interpolated in frequency
+    n_freqs = self.nfreq // 2
+
     # Global immutable cal-stream metadata
     telstate.add("cal_stream_type", "sdp.cal", immutable=True)
     telstate.add("cal_antlist", self.ant_names, immutable=True)
     telstate.add("cal_pol_ordering", ["h", "v"], immutable=True)
     telstate.add("cal_center_freq", self.center_freq, immutable=True)
-    telstate.add("cal_n_chans", self.nfreq, immutable=True)
+    telstate.add("cal_n_chans", n_freqs, immutable=True)
     telstate.add("cal_bandwidth", self.bandwidth, immutable=True)
     # B_parts=1 tells katdal to look for cal_product_B0 (split-cal format)
     telstate.add("cal_product_B_parts", 1, immutable=True)
@@ -469,7 +473,7 @@ class SyntheticObservation:
     )
 
     # B0 (bandpass): shape (n_chans, n_pols, n_ants), complex64, unit amplitude
-    phases_B = rng.uniform(-np.pi, np.pi, (self.nfreq, n_pols, n_ants))
+    phases_B = rng.uniform(-np.pi, np.pi, (n_freqs, n_pols, n_ants))
     gains_B = np.exp(1j * phases_B).astype(np.complex64)
     telstate.add(
       f"{self.capture_block_id}_cal_product_B0",
