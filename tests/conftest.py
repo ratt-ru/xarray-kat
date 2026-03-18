@@ -25,6 +25,7 @@ from katsdptelstate.rdb_writer_base import RDBWriterBase
 from pytest_httpserver import HTTPServer
 
 from xarray_kat.multiton import Multiton
+from xarray_kat.stores.visibility_stores import LOOKUP_TABLES
 from xarray_kat.utils import corrprods_to_baseline_pols
 
 logger = logging.getLogger(__name__)
@@ -648,6 +649,11 @@ class SyntheticObservation:
     corrprods = corrprods_to_baseline_pols(self.bls_ordering)
     return np.array(sorted(range(len(corrprods)), key=lambda i: corrprods[i]))
 
+  @property
+  def auto_indices(self) -> npt.NDArray:
+    """Indices of autocorrelation entries in bls_ordering."""
+    return np.array([i for i, (a, b) in enumerate(self.bls_ordering) if a == b])
+
   def generate_array_data(
     self, array_name: str, dtype: npt.DTypeLike, shape: Tuple[int, ...]
   ) -> npt.NDArray:
@@ -662,11 +668,19 @@ class SyntheticObservation:
       Synthetic data array with realistic values.
     """
     if array_name == "correlator_data":
-      # Generate complex visibility data
-      # Use a simple pattern: ramp + some phase
+      # Generate complex visibility data using a simple ramp + phase pattern.
       ramp = np.arange(np.prod(shape)).reshape(shape).astype(np.float32)
       phase = 2 * np.pi * ramp / np.prod(shape)
-      return (ramp * np.exp(1j * phase)).astype(dtype)
+      data = (ramp * np.exp(1j * phase)).astype(dtype)
+      # Autocorrelations must be real and non-negative for Van Vleck correction.
+      # Values are chosen within the lookup table's valid quantised range.
+      q = LOOKUP_TABLES.instance.quantised
+      n_auto = len(self.auto_indices)
+      auto_vals = np.linspace(
+        q[1], q[-2], shape[0] * shape[1] * n_auto, dtype=np.float32
+      )
+      data[..., self.auto_indices] = auto_vals.reshape(shape[0], shape[1], n_auto)
+      return data
 
     elif array_name == "flags":
       # Generate mostly unflagged data (0 = unflagged, 1+ = flagged)
