@@ -13,12 +13,15 @@ katdal = pytest.importorskip("katdal")
 
 class TestKatdal:
   @pytest.mark.parametrize("uvw_sign_convention", ["fourier", "casa"])
+  @pytest.mark.parametrize("applycal", ["", "all"])
   def test_katdal_mock_server_basic(
-    self, httpserver: HTTPServer, uvw_sign_convention, tmp_path
+    self, httpserver: HTTPServer, applycal, uvw_sign_convention, tmp_path
   ):
     """Tests that xarray-kat and katdal return the same data from the same datasource"""
     obs = SyntheticObservation("1234567890", ntime=8, nfreq=16, nants=4)
     obs.add_scan(range(0, 8), "track", "PKS1934")
+    if applycal:
+      obs.add_calibration_solutions()
     obs.save_to_directory(tmp_path)
 
     _ = setup_mock_archive_server(
@@ -28,9 +31,12 @@ class TestKatdal:
     base_url = httpserver.url_for("/")
     rdb_url = f"{base_url}1234567890/1234567890_sdp_l0.full.rdb"
 
-    ds = katdal.open(rdb_url)
+    ds = katdal.open(rdb_url, applycal=applycal)
     dt = xarray.open_datatree(
-      rdb_url, engine="xarray-kat", uvw_sign_convention=uvw_sign_convention
+      rdb_url,
+      engine="xarray-kat",
+      uvw_sign_convention=uvw_sign_convention,
+      applycal=applycal,
     )
 
     def reorder_katdal_data(data):
@@ -52,7 +58,7 @@ class TestKatdal:
 
     xarray_kat_flags = dt[children[0]].FLAG.data
     katdal_flags = reorder_katdal_data(ds.flags[:])
-    np.testing.assert_allclose(xarray_kat_flags, katdal_flags)
+    np.testing.assert_array_equal(xarray_kat_flags != 0, katdal_flags)
 
     xarray_kat_uvw = dt[children[0]].UVW.data
     katdal_uvw = np.stack([ds.u, ds.v, ds.w], axis=2)[:, obs.corrprod_argsort]

@@ -67,7 +67,7 @@ def scaled_weight_store(
     cal_solutions: npt.NDArray | None = None
 
     if (cal_params := data_products.instance.calibration_params) is not None:
-      cal_solutions = np.empty_like(array.shape, np.complex64)
+      cal_solutions = np.empty(array.shape, np.complex64)
       slices = domain.index_exp
       for n, dump in enumerate(range(slices[0].start, slices[0].stop)):
         cal_solutions[n] = calc_correction_per_corrprod(dump, slices[1], cal_params)
@@ -85,7 +85,7 @@ def scaled_weight_store(
     )
 
     if cal_solutions is not None:
-      apply_weights_correction(array, cal_solutions)
+      array[:] = apply_weights_correction(array, cal_solutions)
 
   return ts.virtual_chunked(
     read_function=read_chunk,
