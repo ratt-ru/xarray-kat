@@ -27,6 +27,7 @@ testing = [
     "dill>=0.4.0",
     # not all dependencies have 3.14 releases yet
     "katdal>=0.23; python_version < '3.14'",
+    "numba>=0.62.1",
     "pytest>=8.4.2",
     "pytest-httpserver>=1.1.0",
     # no 3.14 releases yet

@@ -3,6 +3,7 @@ Changelog
 
 X.Y.Z (DD-MM-YYYY)
 ------------------
+* Add numba to optional testing dependencies (:pr:`56`)
 * Correct application of calibration solutions (:pr:`55`)
 * Add calibration solutions to SyntheticObservation. (:pr:`55`)
 
