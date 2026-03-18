@@ -17,7 +17,7 @@ Opening a dataset
 
 Use ``xarray.open_datatree`` with ``engine="xarray-kat"`` (or let xarray infer
 the engine automatically from the URL).  The call returns a
-:class:`xarray.DataTree` whose children are the individual scans of the
+`xarray.DataTree` whose children are the individual scans of the
 observation.
 
 .. code-block:: python
