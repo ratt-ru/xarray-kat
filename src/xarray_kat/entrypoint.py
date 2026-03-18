@@ -88,6 +88,45 @@ class KatEntryPoint(BackendEntrypoint):
     uvw_sign_convention: UvwSignConventionType = "casa",
     van_vleck: VanVleckLiteralType = "off",
   ):
+    """Open a MeerKAT observation as an :class:`xarray.DataTree`.
+
+    Each scan whose state is in *scan_states* becomes a child node of the
+    returned tree, keyed by ``"<capture_block_id>_<stream_name>/<scan_index>"``.
+    Every node exposes the MSv4-style data variables ``VISIBILITY``, ``WEIGHT``,
+    ``FLAG``, and ``UVW``.
+
+    This method is not normally called directly — use
+    ``xarray.open_datatree(url, engine="xarray-kat", **kwargs)`` instead.
+
+    Args:
+      filename_or_obj: URL of the ``.full.rdb`` file on the MeerKAT archive,
+        e.g. ``"https://archive-gw-1.kat.ac.za/<cbid>/<cbid>_sdp_l0.full.rdb?token=<token>"``.
+      drop_variables: Variable names to drop from the dataset (passed through
+        to xarray).
+      preferred_chunks: Preferred chunk sizes along named dimensions (e.g.
+        ``{"time": 4, "frequency": 512}``).  These are *hints*; the engine
+        may use different sizes where the underlying store dictates.
+      applycal: Calibration products to apply.  Pass ``"all"`` to apply every
+        available product, an explicit list such as ``["l1.G", "l1.B"]``,
+        or ``""`` (default) to skip calibration entirely.
+      scan_states: Scan states to include.  Defaults to ``("scan", "track")``.
+        Scans whose activity sensor value is not in this set are omitted from
+        the tree.
+      capture_block_id: Override the capture-block ID extracted from the RDB
+        file.
+      stream_name: Override the data-stream name extracted from the RDB file.
+      uvw_sign_convention: Sign convention for UVW coordinates.  ``"casa"``
+        (default) negates the values relative to the native MeerKAT convention
+        so that ``UVW = antenna2 - antenna1``; ``"fourier"`` uses the opposite
+        sign.
+      van_vleck: Van Vleck correction to apply to the raw digitiser data.
+        ``"off"`` (default) disables the correction; ``"autocorr"`` corrects
+        autocorrelation amplitudes using the MeerKAT F-engine quantisation
+        lookup table.
+
+    Returns:
+      Tree whose children are individual scans.
+    """
     group_dicts = self.open_groups_as_dict(
       filename_or_obj,
       drop_variables=drop_variables,
