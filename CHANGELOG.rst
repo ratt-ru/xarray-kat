@@ -3,6 +3,7 @@ Changelog
 
 X.Y.Z (DD-MM-YYYY)
 ------------------
+* Update README.rst and document open_datatree (:pr:`58`)
 * Test application of Van Vleck corrections (:pr:`57`)
 * Add numba to optional testing dependencies (:pr:`56`)
 * Correct application of calibration solutions (:pr:`55`)
