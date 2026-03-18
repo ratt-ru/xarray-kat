@@ -447,21 +447,26 @@ class SyntheticObservation:
     # B_parts=1 tells katdal to look for cal_product_B0 (split-cal format)
     telstate.add("cal_product_B_parts", 1, immutable=True)
 
-    # Place the solution one integration before the first dump so it covers
-    # all dumps (sensor interpolation is zeroth-order / held constant).
-    sol_timestamp = self.sync_time - self.int_time
-
+    # Dump timestamps are sync_time + i * int_time + int_time/2.
+    # Place K and B before the first dump (zeroth-order hold suffices).
+    # Place three G solutions — start, midpoint, end — so that
+    # calc_gain_correction interpolates gains in time across all dumps.
+    first_dump_ts = self.sync_time + self.int_time / 2
+    mid_dump_ts = self.sync_time + (self.ntime / 2) * self.int_time
+    last_dump_ts = self.sync_time + self.ntime * self.int_time
     rng = np.random.default_rng(42)
 
-    # G (gain): shape (n_pols, n_ants), complex64, unit amplitude
-    phases_G = rng.uniform(-np.pi, np.pi, (n_pols, n_ants))
-    gains_G = np.exp(1j * phases_G).astype(np.complex64)
-    telstate.add(
-      f"{self.capture_block_id}_cal_product_G",
-      gains_G,
-      ts=sol_timestamp,
-      immutable=False,
-    )
+    # G (gain): shape (n_pols, n_ants), complex64, unit amplitude.
+    # Three solutions with different phases to exercise time interpolation.
+    for ts in (first_dump_ts, mid_dump_ts, last_dump_ts):
+      phases_G = rng.uniform(-np.pi, np.pi, (n_pols, n_ants))
+      gains_G = np.exp(1j * phases_G).astype(np.complex64)
+      telstate.add(
+        f"{self.capture_block_id}_cal_product_G",
+        gains_G,
+        ts=ts,
+        immutable=False,
+      )
 
     # K (delay): shape (n_pols, n_ants), float32, small delays in seconds
     delays_K = rng.uniform(-1e-11, 1e-11, (n_pols, n_ants)).astype(np.float32)
