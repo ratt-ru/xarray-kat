@@ -1,6 +1,10 @@
 Changelog
 =========
 
+0.0.4 (31-03-2026)
+------------------
+* Fix normalise_args incorrectly handling bound classmethods (:pr:`59`)
+
 0.0.3 (18-03-2026)
 ------------------
 * Update README.rst and document open_datatree (:pr:`58`)
