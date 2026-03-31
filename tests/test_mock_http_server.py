@@ -5,6 +5,7 @@ HTTP server serving synthetic observations, without requiring access to the
 actual MeerKAT archive.
 """
 
+import pickle
 import urllib
 import urllib.request
 from typing import TypedDict
@@ -133,6 +134,27 @@ class TestMockHTTPServer:
 
 class TestXarrayKatIntegration:
   """Integration tests with xarray-kat backend."""
+
+  def test_datatree_pickling(self, httpserver: HTTPServer, tmp_path):
+    """Test opening datatree with lazy loading (no chunks parameter)."""
+    # Create and serve a small observation
+    obs = SyntheticObservation("1234567890", ntime=8, nfreq=16, nants=4)
+    obs.add_scan(range(0, 8), "track", "PKS1934")
+    obs.save_to_directory(tmp_path)
+
+    token = setup_mock_archive_server(
+      httpserver, tmp_path, "1234567890", require_auth=True
+    )
+
+    # Construct URL
+    base_url = httpserver.url_for("/")
+    rdb_url = f"{base_url}1234567890/1234567890_sdp_l0.full.rdb?token={token}"
+
+    # Open datatree (lazy loading)
+    dt = xarray.open_datatree(rdb_url, engine="xarray-kat")
+    dt2 = pickle.loads(pickle.dumps(dt))
+
+    xarray.testing.assert_equal(dt.load(), dt2.load())
 
   def test_open_datatree_lazy_loading(self, httpserver: HTTPServer, tmp_path):
     """Test opening datatree with lazy loading (no chunks parameter)."""
