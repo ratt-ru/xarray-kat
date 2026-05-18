@@ -1,6 +1,10 @@
 Changelog
 =========
 
+X.Y.Z (DD-MM-YYYY)
+------------------
+* Add a TTL to Multiton instances
+
 0.0.4 (31-03-2026)
 ------------------
 * Fix normalise_args incorrectly handling bound classmethods (:pr:`59`)
