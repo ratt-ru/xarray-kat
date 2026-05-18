@@ -21,16 +21,6 @@ class DataFactory:
     return Data(a, b)
 
 
-@pytest.fixture(autouse=True)
-def clear_cache():
-  """Ensure a clean cache and heap before and after each test."""
-  Multiton._INSTANCE_CACHE.clear()
-  Multiton._EXPIRY_HEAP.clear()
-  yield
-  Multiton._INSTANCE_CACHE.clear()
-  Multiton._EXPIRY_HEAP.clear()
-
-
 def test_multiton_arg_normalisation():
   """Test that factory keywords are correctly normalised into args"""
   m1 = Multiton(Data, 2.0, b=3.0)

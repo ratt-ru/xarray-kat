@@ -41,8 +41,12 @@ DEFAULT_COORDS = {
 
 @pytest.fixture(autouse=True)
 def clear_multitons():
-  with Multiton._INSTANCE_LOCK:
-    Multiton._INSTANCE_CACHE.clear()
+  """Ensure a clean cache and heap before and after each test."""
+  Multiton._INSTANCE_CACHE.clear()
+  Multiton._EXPIRY_HEAP.clear()
+  yield
+  Multiton._INSTANCE_CACHE.clear()
+  Multiton._EXPIRY_HEAP.clear()
 
 
 # ============================================================================
