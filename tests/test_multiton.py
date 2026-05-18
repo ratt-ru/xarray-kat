@@ -1,6 +1,6 @@
-import gc
 import pickle
 from dataclasses import dataclass
+from unittest.mock import patch
 
 import cloudpickle
 import dill
@@ -19,6 +19,16 @@ class DataFactory:
   @classmethod
   def create(cls, a: float, b: float = 3.0) -> Data:
     return Data(a, b)
+
+
+@pytest.fixture(autouse=True)
+def clear_cache():
+  """Ensure a clean cache and heap before and after each test."""
+  Multiton._INSTANCE_CACHE.clear()
+  Multiton._EXPIRY_HEAP.clear()
+  yield
+  Multiton._INSTANCE_CACHE.clear()
+  Multiton._EXPIRY_HEAP.clear()
 
 
 def test_multiton_arg_normalisation():
@@ -40,20 +50,23 @@ def test_multiton_pickle(method):
 
 
 def test_multiton_release():
-  """Tests that releasing the multiton leads to
-  eviction of the instance from the cache"""
-  # Two multiton that resolve to the same instance
+  """Tests that release() immediately evicts the entry from the shared cache."""
   m1 = Multiton(Data, 1.0, b=3.0)
   m2 = Multiton(Data, 1.0, 3.0)
-  assert m1.instance in Multiton._INSTANCE_CACHE.values()
+  inst = m1.instance
   assert m1.instance is m2.instance
   assert len(Multiton._INSTANCE_CACHE) == 1
+
+  # Release via m2 evicts the entry for all Multitons with this key
   m2.release()
-  gc.collect()
-  assert m1.instance in Multiton._INSTANCE_CACHE.values()
+  assert len(Multiton._INSTANCE_CACHE) == 0
+
+  # m1.instance creates a fresh instance now
+  new_inst = m1.instance
+  assert new_inst is not inst
   assert len(Multiton._INSTANCE_CACHE) == 1
+
   m1.release()
-  gc.collect()
   assert len(Multiton._INSTANCE_CACHE) == 0
 
 
@@ -110,21 +123,134 @@ def test_multiton_classmethod_default_not_duplicated():
   append the default value again on reconstruction, producing a key mismatch
   and a TypeError when calling the factory with too many positional args.
   """
-  # Pass chunk_store-equivalent arg explicitly (overriding its default)
   m = Multiton(DataFactory.create, 2.0, b=5.0)
   m2 = pickle.loads(pickle.dumps(m))
-  # Keys must be equal so the cache is shared
   assert m == m2
-  # Factory must be callable without TypeError
   assert m2.instance == Data(2.0, 5.0)
 
 
-def test_multiton_engaged():
-  """Tests that a multiton instance is automatically engaged,
-  if it has already been engaged by another Multiton"""
+def test_multiton_cache_shared_on_first_access():
+  """Tests that a second Multiton picks up an already-cached instance."""
   m1 = Multiton(Data, 1.0, b=3.0)
-  assert m1._instance is None
   assert m1.instance == Data(1.0, 3.0)
 
   m2 = Multiton(Data, 1.0, b=3.0)
-  assert m2._instance == Data(1.0, 3.0)
+  assert m2.instance is m1.instance
+
+
+def test_multiton_ttl_expiry():
+  """Instance is recreated after TTL expires."""
+  t = [0.0]
+
+  def fake_monotonic():
+    return t[0]
+
+  with patch("xarray_kat.multiton.time") as mock_time:
+    mock_time.monotonic.side_effect = fake_monotonic
+
+    m = Multiton(Data, 1.0, b=3.0).with_args(ttl=10.0)
+    inst1 = m.instance
+
+    # Still within TTL — same instance
+    t[0] = 9.0
+    assert m.instance is inst1
+
+    # Past TTL — new instance
+    t[0] = 20.0
+    inst2 = m.instance
+    assert inst2 is not inst1
+    assert inst2 == inst1
+
+
+def test_multiton_ttl_reset_on_access():
+  """Accessing an instance resets its TTL."""
+  t = [0.0]
+
+  def fake_monotonic():
+    return t[0]
+
+  with patch("xarray_kat.multiton.time") as mock_time:
+    mock_time.monotonic.side_effect = fake_monotonic
+
+    m = Multiton(Data, 1.0, b=3.0).with_args(ttl=10.0)
+    inst1 = m.instance  # created at t=0, last_access=0
+
+    # Access at t=9 resets last_access to 9
+    t[0] = 9.0
+    assert m.instance is inst1
+
+    # At t=18 only 9s have elapsed since last access — still alive
+    t[0] = 18.0
+    assert m.instance is inst1
+
+    # At t=29 more than 10s have elapsed since last access at t=18
+    t[0] = 29.0
+    inst2 = m.instance
+    assert inst2 is not inst1
+
+
+def test_multiton_ttl_pickle_roundtrip():
+  """TTL is preserved through pickle round-trip."""
+  m = Multiton(Data, 1.0, b=3.0).with_args(ttl=42.0)
+  m2 = pickle.loads(pickle.dumps(m))
+  assert m2._ttl == 42.0
+
+
+def test_multiton_default_ttl():
+  """Omitting ttl uses _DEFAULT_TTL."""
+  m = Multiton(Data, 1.0, b=3.0)
+  assert m._ttl == Multiton._DEFAULT_TTL
+
+
+def test_multiton_expired_entries_swept_on_access():
+  """Expired entries from other keys are removed when any instance is accessed."""
+  t = [0.0]
+
+  def fake_monotonic():
+    return t[0]
+
+  with patch("xarray_kat.multiton.time") as mock_time:
+    mock_time.monotonic.side_effect = fake_monotonic
+
+    m1 = Multiton(Data, 1.0, b=1.0).with_args(ttl=5.0)
+    m2 = Multiton(Data, 2.0, b=2.0).with_args(ttl=100.0)
+    m1.instance
+    m2.instance
+    assert len(Multiton._INSTANCE_CACHE) == 2
+
+    # Advance past m1's TTL; access m2 to trigger sweep
+    t[0] = 10.0
+    m2.instance
+    assert len(Multiton._INSTANCE_CACHE) == 1
+    assert m1._key not in Multiton._INSTANCE_CACHE
+
+
+def test_multiton_heap_stale_entries_discarded():
+  """TTL resets push new heap entries; stale entries are discarded during purge."""
+  t = [0.0]
+
+  def fake_monotonic():
+    return t[0]
+
+  with patch("xarray_kat.multiton.time") as mock_time:
+    mock_time.monotonic.side_effect = fake_monotonic
+
+    m = Multiton(Data, 1.0, b=3.0).with_args(ttl=10.0)
+    m.instance  # heap: 1 entry (expiry=10)
+    assert len(Multiton._EXPIRY_HEAP) == 1
+
+    t[0] = 5.0
+    m.instance  # TTL reset: heap grows to 2 (old stale + new at expiry=15)
+    assert len(Multiton._EXPIRY_HEAP) == 2
+
+    # At t=12 the stale entry (expiry=10) is past its deadline but the live
+    # entry (expiry=15) is not. Purge should discard the stale entry only.
+    t[0] = 12.0
+    m.instance  # triggers purge, pops stale entry; live entry refreshed
+    assert len(Multiton._INSTANCE_CACHE) == 1
+
+    # Release removes from cache; orphaned heap entry is discarded during next purge.
+    m.release()
+    assert len(Multiton._INSTANCE_CACHE) == 0
+    m.instance  # recreates; purge discards the orphaned heap entry(s)
+    assert len(Multiton._INSTANCE_CACHE) == 1
