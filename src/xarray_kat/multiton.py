@@ -10,7 +10,7 @@ from xarray_kat.utils.serialisation import FrozenKey, normalise_args
 
 T = TypeVar("T")
 
-# (instance, last_accessed_monotonic, ttl_seconds, seq)
+# (object, last_accessed_monotonic, ttl_seconds, seq)
 _CacheEntry = Tuple[Any, float, float, int]
 # (expiry_monotonic, seq, key) — min-heap ordered by expiry
 _HeapEntry = Tuple[float, int, FrozenKey]
@@ -101,12 +101,12 @@ class Multiton(Generic[T]):
     return self._key == other._key
 
   @classmethod
-  def _write_entry(cls, key: FrozenKey, inst: Any, ttl: float) -> None:
+  def _write_entry(cls, key: FrozenKey, obj: Any, ttl: float) -> None:
     """Write a cache entry and push the corresponding heap entry.
     Must be called under the lock."""
     seq = next(cls._SEQUENCE)
     now = time.monotonic()
-    cls._INSTANCE_CACHE[key] = (inst, now, ttl, seq)
+    cls._INSTANCE_CACHE[key] = (obj, now, ttl, seq)
     heapq.heappush(cls._EXPIRY_HEAP, (now + ttl, seq, key))
 
   @classmethod
@@ -137,14 +137,15 @@ class Multiton(Generic[T]):
       self._purge_expired()
       entry = self._INSTANCE_CACHE.get(self._key)
 
+      # Reset the TTL
       if entry is not None:
-        instance, _, ttl, _ = entry
-        self._write_entry(self._key, instance, ttl)
-        return instance
+        obj, _, ttl, _ = entry
+        self._write_entry(self._key, obj, ttl)
+        return obj
 
-      instance = self._factory(*self._args, **self._kw)
-      self._write_entry(self._key, instance, self._ttl)
-      return instance
+      obj = self._factory(*self._args, **self._kw)
+      self._write_entry(self._key, obj, self._ttl)
+      return obj
 
   def release(self) -> None:
     """Immediately evict this Multiton's instance from the cache.

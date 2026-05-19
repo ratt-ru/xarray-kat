@@ -43,7 +43,7 @@ def test_multiton_release():
   """Tests that release() immediately evicts the entry from the shared cache."""
   m1 = Multiton(Data, 1.0, b=3.0)
   m2 = Multiton(Data, 1.0, 3.0)
-  inst = m1.instance
+  obj = m1.instance
   assert m1.instance is m2.instance
   assert len(Multiton._INSTANCE_CACHE) == 1
 
@@ -53,7 +53,7 @@ def test_multiton_release():
 
   # m1.instance creates a fresh instance now
   new_inst = m1.instance
-  assert new_inst is not inst
+  assert new_inst is not obj
   assert len(Multiton._INSTANCE_CACHE) == 1
 
   m1.release()
