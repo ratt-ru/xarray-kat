@@ -422,6 +422,31 @@ class TestXarrayKatIntegration:
       assert "VISIBILITY" in ds
       assert "time" in ds.dims
 
+  def test_ignored_kwargs_warning(self, httpserver: HTTPServer, tmp_path):
+    """Unsupported xarray kwargs trigger IgnoredArgument, but the tree still loads."""
+    import warnings
+
+    from xarray_kat.errors import IgnoredArgument
+
+    obs = SyntheticObservation("1234567890", ntime=8, nfreq=16, nants=4)
+    obs.add_scan(range(0, 8), "track", "PKS1934")
+    obs.save_to_directory(tmp_path)
+
+    token = setup_mock_archive_server(
+      httpserver, tmp_path, "1234567890", require_auth=True
+    )
+    base_url = httpserver.url_for("/")
+    rdb_url = f"{base_url}1234567890/1234567890_sdp_l0.full.rdb?token={token}"
+
+    with warnings.catch_warnings(record=True) as caught:
+      warnings.simplefilter("always")
+      dt = xarray.open_datatree(rdb_url, engine="xarray-kat", unsupported_kwarg=True)
+
+    ignored = [w for w in caught if issubclass(w.category, IgnoredArgument)]
+    assert len(ignored) == 1
+    assert "unsupported_kwarg" in str(ignored[0].message)
+    assert len(dt.children) > 0
+
   def test_field_and_source_xds_dataset(self, httpserver: HTTPServer, tmp_path):
     """Test field_and_source_xds structure and values"""
     from tests.conftest import DEFAULT_COORDS

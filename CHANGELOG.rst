@@ -3,7 +3,8 @@ Changelog
 
 X.Y.Z (DD-MM-YYYY)
 ------------------
-* Add a TTL to Multiton instances
+* Allow unsupported arguments in entrypoint methods (:pr:`61`)
+* Add a TTL to Multiton instances (:pr:`60`)
 
 0.0.4 (31-03-2026)
 ------------------

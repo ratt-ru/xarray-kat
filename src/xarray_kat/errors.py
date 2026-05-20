@@ -4,3 +4,7 @@ class InvalidJwtToken(ValueError):
 
 class TelstateKeyError(ValueError):
   """Raised if some required key is not present in the telescope state"""
+
+
+class IgnoredArgument(UserWarning):
+  """Issued when keyword arguments are passed that this backend does not support."""
