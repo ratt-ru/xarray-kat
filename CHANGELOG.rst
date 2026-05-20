@@ -3,7 +3,7 @@ Changelog
 
 X.Y.Z (DD-MM-YYYY)
 ------------------
-* Allow unsupported arguments in entrypoint functions (:pr:`61`)
+* Allow unsupported arguments in entrypoint methods (:pr:`61`)
 * Add a TTL to Multiton instances (:pr:`60`)
 
 0.0.4 (31-03-2026)
