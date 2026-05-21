@@ -1,10 +1,14 @@
 Changelog
 =========
 
+X.Y.Z (DD-MM-YYYY)
+------------------
+* Revert: Allow unsupported arguments in entrypoint methods (:pr:`62`)
+
 0.0.5 (20-05-2026)
 ------------------
 * Allow unsupported arguments in entrypoint methods (:pr:`61`)
-* Add a TTL to Multiton instances (:pr:`60`)
+* Add a TTL to Multiton instances
 
 0.0.4 (31-03-2026)
 ------------------
