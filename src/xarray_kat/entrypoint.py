@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import inspect
 import os
-import warnings
 from types import FrameType
 from typing import TYPE_CHECKING, Any, Dict, Iterable, Tuple
 from urllib.parse import SplitResult, parse_qs, urlsplit
@@ -17,7 +16,6 @@ if TYPE_CHECKING:
 
 
 from xarray_kat.datatree_factory import DataTreeFactory
-from xarray_kat.errors import IgnoredArgument
 from xarray_kat.katdal_types import TelstateDataProducts, TelstateDataSource
 from xarray_kat.multiton import Multiton
 from xarray_kat.xkat_types import UvwSignConventionType, VanVleckLiteralType
@@ -89,7 +87,6 @@ class KatEntryPoint(BackendEntrypoint):
     stream_name: str | None = None,
     uvw_sign_convention: UvwSignConventionType = "casa",
     van_vleck: VanVleckLiteralType = "off",
-    **kwargs,
   ):
     """Open a MeerKAT observation as an :class:`xarray.DataTree`.
 
@@ -140,7 +137,6 @@ class KatEntryPoint(BackendEntrypoint):
       stream_name=stream_name,
       uvw_sign_convention=uvw_sign_convention,
       van_vleck=van_vleck,
-      **kwargs,
     )
     return DataTree.from_dict(group_dicts)
 
@@ -156,15 +152,7 @@ class KatEntryPoint(BackendEntrypoint):
     stream_name: str | None = None,
     uvw_sign_convention: UvwSignConventionType = "casa",
     van_vleck: VanVleckLiteralType = "off",
-    **kwargs,
   ) -> Dict[str, Any]:
-    if kwargs:
-      warnings.warn(
-        f"xarray-kat does not support the following arguments and will ignore them: "
-        f"{sorted(kwargs)}",
-        IgnoredArgument,
-        stacklevel=2,
-      )
     url = str(filename_or_obj)
     urlbits = urlsplit(url)
     assert urlbits.scheme in {"http", "https"}
