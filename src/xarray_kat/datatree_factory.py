@@ -327,10 +327,13 @@ class DataTreeFactory:
         return a
     else:
       warnings.warn(
-        f"xarray.open_{{groups,datatree}} was invoked without "
-        f'the "chunks" argument. This should be specified, '
-        f'along with the "chunked_array_type" ({self._chunked_array_type}), '
-        f'which should be set to "xarray-kat" or "dask"',
+        f"The xarray-kat backend should be invoked as "
+        f"xarray.open_{{datatree,groups}}"
+        f"(url, chunked_array_type='xarray-kat', chunks={{}}) "
+        f"for optimal data access via dataset.load() operations. "
+        f"Got chunks={self._chunks} "
+        f"and chunked_array_type='{self._chunked_array_type}' "
+        f"('dask' also can be used).",
         UserWarning,
       )
       ArrayClass = ImmediateBackendArray
