@@ -3,6 +3,7 @@ Changelog
 
 X.Y.Z (DD-MM-YYYY)
 ------------------
+* Improve warning message for ``chunked_array_type`` and ``chunks`` arguments (:pr:`63`)
 * Revert: Allow unsupported arguments in entrypoint methods (:pr:`62`)
 
 0.0.5 (20-05-2026)
