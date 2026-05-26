@@ -19,8 +19,10 @@ class TestKatdal:
     self, httpserver: HTTPServer, applycal, uvw_sign_convention, van_vleck, tmp_path
   ):
     """Tests that xarray-kat and katdal return the same data from the same datasource"""
-    obs = SyntheticObservation("1234567890", ntime=8, nfreq=16, nants=4)
+    obs = SyntheticObservation("1234567890", ntime=25, nfreq=16, nants=4)
     obs.add_scan(range(0, 8), "track", "PKS1934")
+    obs.add_scan(range(8, 20), "scan", "3C286")
+    obs.add_scan(range(20, 25), "track", "PKS1934")
     if applycal:
       obs.add_calibration_solutions()
     obs.save_to_directory(tmp_path)
@@ -41,29 +43,32 @@ class TestKatdal:
       van_vleck=van_vleck,
     )
 
-    def reorder_katdal_data(data):
+    def reorder_katdal_data(data, ntime):
       return (
         data[..., obs.corrprod_argsort]
-        .reshape(obs.ntime, obs.nfreq, obs.nbl, obs.npol)
+        .reshape(ntime, obs.nfreq, obs.nbl, obs.npol)
         .transpose(0, 2, 1, 3)
-        .reshape(obs.ntime, obs.nbl, obs.nfreq, obs.npol)
       )
 
-    assert len(children := list(dt.children)) == 1
-    xarray_kat_vis = dt[children[0]].VISIBILITY.data
-    katdal_vis = reorder_katdal_data(ds.vis[:])
-    np.testing.assert_allclose(xarray_kat_vis, katdal_vis)
+    for key, node in dt.children.items():
+      scans = list(set(map(int, node.ds.scan_name.values)))
+      ds.select(scans=scans)
+      ntime = node.sizes["time"]
 
-    xarray_kat_weight = dt[children[0]].WEIGHT.data
-    katdal_weights = reorder_katdal_data(ds.weights[:])
-    np.testing.assert_allclose(xarray_kat_weight, katdal_weights)
+      xarray_kat_vis = node.VISIBILITY.data
+      katdal_vis = reorder_katdal_data(ds.vis[:], ntime)
+      np.testing.assert_allclose(xarray_kat_vis, katdal_vis)
 
-    xarray_kat_flags = dt[children[0]].FLAG.data
-    katdal_flags = reorder_katdal_data(ds.flags[:])
-    np.testing.assert_array_equal(xarray_kat_flags != 0, katdal_flags)
+      xarray_kat_weight = node.WEIGHT.data
+      katdal_weights = reorder_katdal_data(ds.weights[:], ntime)
+      np.testing.assert_allclose(xarray_kat_weight, katdal_weights)
 
-    xarray_kat_uvw = dt[children[0]].UVW.data
-    katdal_uvw = np.stack([ds.u, ds.v, ds.w], axis=2)[:, obs.corrprod_argsort]
-    if uvw_sign_convention == "casa":
-      katdal_uvw = -katdal_uvw
-    np.testing.assert_allclose(xarray_kat_uvw, katdal_uvw[:, :: obs.npol])
+      xarray_kat_flags = node.FLAG.data
+      katdal_flags = reorder_katdal_data(ds.flags[:], ntime)
+      np.testing.assert_array_equal(xarray_kat_flags != 0, katdal_flags)
+
+      xarray_kat_uvw = node.UVW.data
+      katdal_uvw = np.stack([ds.u, ds.v, ds.w], axis=2)[:, obs.corrprod_argsort]
+      if uvw_sign_convention == "casa":
+        katdal_uvw = -katdal_uvw
+      np.testing.assert_allclose(xarray_kat_uvw, katdal_uvw[:, :: obs.npol])
