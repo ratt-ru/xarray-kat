@@ -67,7 +67,11 @@ def report_mismatch(actual, desired, decimal=6):
 
 def compare_vs_katdal(args):
   dt = xarray.open_datatree(
-    args.url, chunked_array_type="xarray-kat", chunks={}, applycal=args.applycal, uvw_sign_convention="fourier"
+    args.url,
+    chunked_array_type="xarray-kat",
+    chunks={},
+    applycal=args.applycal,
+    uvw_sign_convention="fourier",
   )
   ds = katdal.open(args.url, applycal=args.applycal)
 
