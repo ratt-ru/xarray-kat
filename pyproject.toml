@@ -14,6 +14,10 @@ dependencies = [
     "xarray>=2025.9.1",
 ]
 
+[project.scripts]
+xarray-kat = "xarray_kat.cli:main"
+
+
 [project.entry-points."xarray.backends"]
 "xarray-kat" = "xarray_kat.entrypoint:KatEntryPoint"
 
