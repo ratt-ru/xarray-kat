@@ -3,6 +3,7 @@ Changelog
 
 X.Y.Z (DD-MM-YYYY)
 ------------------
+* Output active calibration corrections in katdal comparison script (:pr:`66`)
 * Add a script for comparing MSv4 DataTree values against a katdal dataset (:pr:`65`)
 * Add multiple scans to the katdal comparison test case (:pr:`64`)
 * Improve warning message for ``chunked_array_type`` and ``chunks`` arguments (:pr:`63`)
