@@ -90,6 +90,9 @@ def compare_vs_katdal(args):
     sorted(range(len(baseline_pols)), key=lambda i: baseline_pols[i])
   )
 
+  if (cal_params := data_products.calibration_params) is not None:
+    print(f"Calibration parameters: {list(cal_params.corrections.keys())}")
+
   for path, node in dt.children.items():
     scan = node.ds
     print(
