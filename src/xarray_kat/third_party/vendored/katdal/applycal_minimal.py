@@ -1,5 +1,4 @@
 import logging
-import warnings
 
 import numpy as np
 
@@ -80,13 +79,6 @@ def complex_interp(x, xi, yi, left=None, right=None):
   return y.astype(yi.dtype)
 
 
-def quiet_reciprocal(x):
-  """Invert `x` but don't complain about invalid values."""
-  with warnings.catch_warnings():
-    warnings.filterwarnings("ignore", "invalid value", RuntimeWarning)
-    return np.reciprocal(x)
-
-
 def _parse_cal_product(cal_product):
   """Split `cal_product` into `cal_stream` and `product_type` parts."""
   fields = cal_product.rsplit(".", 1)
@@ -157,7 +149,7 @@ def calc_bandpass_correction(sensor, index, data_freqs, cal_freqs):
       )
     else:
       bp = np.full(len(data_freqs), INVALID_GAIN)
-    corrections.append(ComparableArrayWrapper(quiet_reciprocal(bp)))
+    corrections.append(ComparableArrayWrapper(np.reciprocal(bp)))
   return CategoricalData(corrections, sensor.events)
 
 
@@ -197,22 +189,16 @@ def calc_gain_correction(sensor, index, targets=None):
   if targets is None:
     targets = CategoricalData([0], [0, len(dumps)])
   smooth_gains = np.full((len(dumps), gains.shape[0]), INVALID_GAIN)
-  # We either have a single dummy target (L1) or iterate over actual targets (L2)
+  # Iterate over number of channels / "IFs" / subbands in gain product
   for target in targets.unique_values:
     on_target = targets == target
-    # Iterate over number of channels / "IFs" / subbands in gain product
     for chan, gains_per_chan in enumerate(gains):
       valid = np.isfinite(gains_per_chan) & on_target[events]
       if valid.any():
-        # The current target has at least one valid gain solution in the channel
         smooth_gains[on_target, chan] = complex_interp(
           dumps[on_target], events[valid], gains_per_chan[valid]
         )
-      elif not on_target[events].any():
-        # We are on a target without any (L2) gain solutions, i.e. a calibrator.
-        # Rather preserve the L1 gains by setting L2 gains to 1.0 in this case.
-        smooth_gains[on_target, chan] = np.complex64(1.0)
-  return quiet_reciprocal(smooth_gains)
+  return np.reciprocal(smooth_gains)
 
 
 def calibrate_flux(sensor, targets, gaincal_flux):
