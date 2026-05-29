@@ -391,8 +391,8 @@ class DataTreeFactory:
     ant2_names = np.array(cp_ant2_names[:: len(upols)], dtype=str)
     concat_ant_names = np.concatenate([ant1_names, ant2_names])
     _, inv = np.unique(concat_ant_names, return_inverse=True)
-    ant1_index = inv[len(inv) // 2 :]
-    ant2_index = inv[: len(inv) // 2]
+    ant1_index = inv[: len(inv) // 2]
+    ant2_index = inv[len(inv) // 2 :]
 
     pols = np.array([HV_TO_LINEAR_MAP[p] for p in cp_pols[: len(upols)]], dtype=str)
 
