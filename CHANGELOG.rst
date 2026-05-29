@@ -3,6 +3,7 @@ Changelog
 
 X.Y.Z (DD-MM-YYYY)
 ------------------
+* Fix computation of uvw sign convention
 * Output active calibration corrections in katdal comparison script (:pr:`66`)
 * Add a script for comparing MSv4 DataTree values against a katdal dataset (:pr:`65`)
 * Add multiple scans to the katdal comparison test case (:pr:`64`)

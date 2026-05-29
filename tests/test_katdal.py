@@ -69,6 +69,6 @@ class TestKatdal:
 
       xarray_kat_uvw = node.UVW.data
       katdal_uvw = np.stack([ds.u, ds.v, ds.w], axis=2)[:, obs.corrprod_argsort]
-      if uvw_sign_convention == "casa":
+      if uvw_sign_convention == "fourier":
         katdal_uvw = -katdal_uvw
       np.testing.assert_allclose(xarray_kat_uvw, katdal_uvw[:, :: obs.npol])
