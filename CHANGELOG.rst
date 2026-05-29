@@ -1,7 +1,7 @@
 Changelog
 =========
 
-X.Y.Z (DD-MM-YYYY)
+0.0.6 (29-05-2026)
 ------------------
 * Fix sign convention of UVW coordinates (:pr:`68`)
 * Output active calibration corrections in katdal comparison script (:pr:`66`)
