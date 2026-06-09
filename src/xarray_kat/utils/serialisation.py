@@ -73,13 +73,17 @@ def normalise_args(
   spec = inspect.getfullargspec(factory)
   args = list(args)
 
-  for i, arg in enumerate(spec.args):
+  # For bound methods (classmethods or instance methods), the first parameter
+  # (cls/self) is already bound and is not part of the effective call signature.
+  param_args = spec.args[1:] if inspect.ismethod(factory) else spec.args
+
+  for i, arg in enumerate(param_args):
     if i < len(args):
       continue
     elif arg in kw:
       args.append(kw.pop(arg))
-    elif spec.defaults and len(spec.args) - len(spec.defaults) <= i:
-      default = spec.defaults[i - (len(spec.args) - len(spec.defaults))]
+    elif spec.defaults and len(param_args) - len(spec.defaults) <= i:
+      default = spec.defaults[i - (len(param_args) - len(spec.defaults))]
       args.append(default)
 
   return tuple(args), kw

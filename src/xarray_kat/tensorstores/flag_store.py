@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import numpy as np
 import tensorstore as ts
 
 from xarray_kat.third_party.vendored.katdal.applycal_minimal import (
@@ -10,7 +11,6 @@ from xarray_kat.third_party.vendored.katdal.applycal_minimal import (
 )
 
 if TYPE_CHECKING:
-  import numpy as np
   import numpy.typing as npt
 
   from xarray_kat.katdal_types import TelstateDataProducts
@@ -46,7 +46,7 @@ def final_flag_store(
     array[:] = flags_future.result()
 
     if cal_solutions is not None:
-      apply_flags_correction(array, cal_solutions)
+      array[:] = apply_flags_correction(array, cal_solutions)
 
   return ts.virtual_chunked(
     read_function=read_chunk,

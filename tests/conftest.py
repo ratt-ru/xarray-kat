@@ -25,6 +25,7 @@ from katsdptelstate.rdb_writer_base import RDBWriterBase
 from pytest_httpserver import HTTPServer
 
 from xarray_kat.multiton import Multiton
+from xarray_kat.tensorstores.visibility_stores import LOOKUP_TABLES
 from xarray_kat.utils import corrprods_to_baseline_pols
 
 logger = logging.getLogger(__name__)
@@ -40,8 +41,12 @@ DEFAULT_COORDS = {
 
 @pytest.fixture(autouse=True)
 def clear_multitons():
-  with Multiton._INSTANCE_LOCK:
-    Multiton._INSTANCE_CACHE.clear()
+  """Ensure a clean cache and heap before and after each test."""
+  Multiton._INSTANCE_CACHE.clear()
+  Multiton._EXPIRY_HEAP.clear()
+  yield
+  Multiton._INSTANCE_CACHE.clear()
+  Multiton._EXPIRY_HEAP.clear()
 
 
 # ============================================================================
@@ -118,76 +123,6 @@ def dict_to_rdb(data: Dict[str, Any], output_path: Path) -> int:
       writer.write_key(key_bytes, dumped_value)
 
   return writer.keys_written
-
-
-def create_sensor_data(
-  ntime: int, scan_configs: list[dict] | None = None
-) -> Dict[str, list]:
-  """Create synthetic sensor data arrays for observation metadata (legacy API).
-
-  This is a backward-compatible wrapper that returns sensor data as arrays
-  instead of adding them to a telstate object. For new code, use add_sensor_data().
-
-  Args:
-    ntime: Number of time samples in the observation.
-    scan_configs: List of scan configuration dicts.
-
-  Returns:
-    Dictionary with sensor data arrays.
-  """
-  # Create temporary telstate
-  ts = katsdptelstate.TelescopeState()
-  int_time = 8.0
-  sync_time = 1234567890.0
-
-  # Add sensor data
-  add_sensor_data(ts, ntime, int_time, sync_time, scan_configs)
-
-  # Extract as arrays for backward compatibility
-  result: dict[str, Any] = {}
-  for key in ts.keys():
-    if ts.key_type(key) == katsdptelstate.KeyType.MUTABLE:
-      data = ts.get_range(key, st=0)
-      if data:
-        values, times = zip(*data)
-        # Create array-like representation
-        # Map each timestamp to the corresponding time index
-        timestamps_arr = sync_time + np.arange(ntime) * int_time + int_time / 2
-        value_array = [None] * ntime
-        for val, ts_val in zip(values, times):
-          # Find which time indices this value applies to
-          # (from this timestamp until the next one or end)
-          idx = np.searchsorted(timestamps_arr, ts_val, side="right") - 1
-          if idx >= 0:
-            value_array[idx] = val
-
-        # Forward fill None values
-        last_val = value_array[0]
-        for i in range(ntime):
-          if value_array[i] is not None:
-            last_val = value_array[i]
-          else:
-            value_array[i] = last_val
-
-        # Store with legacy key names
-        if key == "obs_activity":
-          result["Observation/scan_state"] = value_array
-        elif key == "obs_target":
-          result["Observation/target"] = value_array
-
-  # Add scan indices (simple sequential numbering based on state changes)
-  if "Observation/scan_state" in result:
-    scan_indices = [0] * ntime
-    current_scan = 0
-    prev_state = None
-    for i, state in enumerate(result["Observation/scan_state"]):
-      if state != prev_state and prev_state is not None:
-        current_scan += 1
-      scan_indices[i] = current_scan
-      prev_state = state
-    result["Observation/scan_index"] = scan_indices
-
-  return result
 
 
 def add_sensor_data(
@@ -439,8 +374,14 @@ class SyntheticObservation:
     # Generate correlation products (baseline-polarization pairs)
     self.bls_ordering = self._generate_bls_ordering()
 
+    # Timing
+    self.sync_time = 1234567890.0
+
     # Scan configurations (can be added via add_scan)
     self.scan_configs: List[Dict] = []
+
+    # Calibration solutions (can be enabled via add_calibration_solutions)
+    self.include_calibration = False
 
     # Default chunking (can be customized)
     self.time_chunk_size = 2
@@ -464,6 +405,96 @@ class SyntheticObservation:
               [f"{self.ant_names[i]}{pol1}", f"{self.ant_names[j]}{pol2}"]
             )
     return bls_ordering
+
+  def add_calibration_solutions(self) -> None:
+    """Enable synthetic calibration solutions for this observation.
+
+    When called, calibration metadata and per-dump gain solutions will be
+    written into the telstate. This allows TelstateDataProducts to find
+    a non-None calibration_params when constructed with applycal="all".
+
+    The solutions use unit-amplitude complex gains with random phases so
+    that the correction is well-defined but non-trivial.
+
+    Example:
+      >>> obs = SyntheticObservation("1234567890", ntime=10, nfreq=16, nants=4)
+      >>> obs.add_scan(range(0, 10), "track", "PKS1934")
+      >>> obs.add_calibration_solutions()
+      >>> obs.save_to_directory(Path("/tmp/mock_archive"))
+    """
+    self.include_calibration = True
+
+  def _add_cal_data(self, telstate: katsdptelstate.TelescopeState) -> None:
+    """Write synthetic calibration solutions into *telstate*.
+
+    Adds the minimum set of keys required by katdal's applycal machinery:
+    - Global immutable keys describing the "cal" stream (antlist, pol_ordering,
+      spectral info, product_B_parts).
+    - Per-capture-block mutable sensor keys for G, K, and B0 products.
+
+    All solutions use unit amplitude with random phases (seeded for
+    reproducibility), so they are invertible but non-trivial.
+    """
+    n_pols = 2  # 'h' and 'v'
+    n_ants = self.nants
+
+    # bandpass calibration solutions are frequently
+    # interpolated in frequency
+    n_freqs = self.nfreq // 2
+
+    # Global immutable cal-stream metadata
+    telstate.add("cal_stream_type", "sdp.cal", immutable=True)
+    telstate.add("cal_antlist", self.ant_names, immutable=True)
+    telstate.add("cal_pol_ordering", ["h", "v"], immutable=True)
+    telstate.add("cal_center_freq", self.center_freq, immutable=True)
+    telstate.add("cal_n_chans", n_freqs, immutable=True)
+    telstate.add("cal_bandwidth", self.bandwidth, immutable=True)
+    # B_parts=1 tells katdal to look for cal_product_B0 (split-cal format)
+    telstate.add("cal_product_B_parts", 1, immutable=True)
+
+    # Dump timestamps are sync_time + i * int_time + int_time/2.
+    # Place K and B before the first dump (zeroth-order hold suffices).
+    # Place three G solutions — start, midpoint, end — so that
+    # calc_gain_correction interpolates gains in time across all dumps.
+    first_dump_ts = self.sync_time + self.int_time / 2
+    mid_dump_ts = self.sync_time + (self.ntime / 2) * self.int_time
+    last_dump_ts = self.sync_time + self.ntime * self.int_time
+    rng = np.random.default_rng(42)
+
+    # G (gain): shape (n_pols, n_ants), complex64, unit amplitude.
+    # Three solutions with different phases to exercise time interpolation.
+    for ts in (first_dump_ts, mid_dump_ts, last_dump_ts):
+      phases_G = rng.uniform(-np.pi, np.pi, (n_pols, n_ants))
+      gains_G = np.exp(1j * phases_G).astype(np.complex64)
+      telstate.add(
+        f"{self.capture_block_id}_cal_product_G",
+        gains_G,
+        ts=ts,
+        immutable=False,
+      )
+
+    # K (delay): shape (n_pols, n_ants), float32, small delays in seconds.
+    # Two solutions (step function in time — no interpolation, zeroth-order hold).
+    for ts in (first_dump_ts, mid_dump_ts):
+      delays_K = rng.uniform(-1e-11, 1e-11, (n_pols, n_ants)).astype(np.float32)
+      telstate.add(
+        f"{self.capture_block_id}_cal_product_K",
+        delays_K,
+        ts=ts,
+        immutable=False,
+      )
+
+    # B0 (bandpass): shape (n_chans, n_pols, n_ants), complex64, unit amplitude.
+    # Two solutions (step function in time — no interpolation, zeroth-order hold).
+    for ts in (first_dump_ts, mid_dump_ts):
+      phases_B = rng.uniform(-np.pi, np.pi, (n_freqs, n_pols, n_ants))
+      gains_B = np.exp(1j * phases_B).astype(np.complex64)
+      telstate.add(
+        f"{self.capture_block_id}_cal_product_B0",
+        gains_B,
+        ts=ts,
+        immutable=False,
+      )
 
   def add_scan(
     self, indices: range | List[int], state: str, target: str | None
@@ -518,7 +549,7 @@ class SyntheticObservation:
       "stream_type": "sdp.vis",
       "sub_product": "sdp_l0",
       # Timing information
-      "sync_time": 1234567890.0,  # Mock epoch time
+      "sync_time": self.sync_time,
       "first_timestamp": 0.0,
       "int_time": self.int_time,
       # Frequency information
@@ -610,6 +641,9 @@ class SyntheticObservation:
       ant_names=self.ant_names,
     )
 
+    if self.include_calibration:
+      self._add_cal_data(telstate)
+
     return telstate
 
   @property
@@ -618,6 +652,11 @@ class SyntheticObservation:
     into a canonical (baseline_id, polarization) ordering"""
     corrprods = corrprods_to_baseline_pols(self.bls_ordering)
     return np.array(sorted(range(len(corrprods)), key=lambda i: corrprods[i]))
+
+  @property
+  def auto_indices(self) -> npt.NDArray:
+    """Indices of autocorrelation entries in bls_ordering."""
+    return np.array([i for i, (a, b) in enumerate(self.bls_ordering) if a == b])
 
   def generate_array_data(
     self, array_name: str, dtype: npt.DTypeLike, shape: Tuple[int, ...]
@@ -633,11 +672,19 @@ class SyntheticObservation:
       Synthetic data array with realistic values.
     """
     if array_name == "correlator_data":
-      # Generate complex visibility data
-      # Use a simple pattern: ramp + some phase
+      # Generate complex visibility data using a simple ramp + phase pattern.
       ramp = np.arange(np.prod(shape)).reshape(shape).astype(np.float32)
       phase = 2 * np.pi * ramp / np.prod(shape)
-      return (ramp * np.exp(1j * phase)).astype(dtype)
+      data = (ramp * np.exp(1j * phase)).astype(dtype)
+      # Autocorrelations must be real and non-negative for Van Vleck correction.
+      # Values are chosen within the lookup table's valid quantised range.
+      q = LOOKUP_TABLES.instance.quantised
+      n_auto = len(self.auto_indices)
+      auto_vals = np.linspace(
+        q[1], q[-2], shape[0] * shape[1] * n_auto, dtype=np.float32
+      )
+      data[..., self.auto_indices] = auto_vals.reshape(shape[0], shape[1], n_auto)
+      return data
 
     elif array_name == "flags":
       # Generate mostly unflagged data (0 = unflagged, 1+ = flagged)

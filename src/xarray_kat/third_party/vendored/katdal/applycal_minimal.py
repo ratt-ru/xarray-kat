@@ -676,35 +676,43 @@ def calc_correction(
   )
 
 
-if not numba:
-  """ Slower numpy variants """
+""" Slower numpy variants """
 
-  def apply_vis_correction(data, correction):
-    """Clean up and apply `correction` to visibility data in `data`."""
-    out = np.copy(data)
-    mask = np.isnan(correction)
-    out[mask] *= correction[mask]
-    return out
 
-  def apply_weights_correction(data, correction):
-    """Clean up and apply `correction` to weight data in `data`."""
-    out = np.copy(data)
-    correction_sqrd = correction.real**2 + correction.imag**2
-    mask = np.isnan(correction_sqrd)
-    out[mask] /= correction_sqrd[mask]
-    out[~mask] = 0
-    return out
+def np_apply_vis_correction(data, correction):
+  """Clean up and apply `correction` to visibility data in `data`."""
+  out = np.copy(data)
+  mask = np.isnan(correction)
+  out[~mask] *= correction[~mask]
+  return out
 
-  def apply_flags_correction(data, correction):
-    """Set POSTPROC flag wherever `correction` is invalid."""
-    out = np.copy(data)
-    out[np.isnan(correction)] |= POSTPROC
-    return out
-else:
+
+def np_apply_weights_correction(data, correction):
+  """Clean up and apply `correction` to weight data in `data`."""
+  out = np.copy(data)
+  correction_sqrd = correction.real**2 + correction.imag**2
+  mask = np.isnan(correction_sqrd)
+  out[~mask] /= correction_sqrd[~mask]
+  out[mask] = 0
+  return out
+
+
+def np_apply_flags_correction(data, correction):
+  """Set POSTPROC flag wherever `correction` is invalid."""
+  out = np.copy(data)
+  out[np.isnan(correction)] |= POSTPROC
+  return out
+
+
+apply_vis_correction = np_apply_vis_correction
+apply_weights_correction = np_apply_weights_correction
+apply_flags_correction = np_apply_flags_correction
+
+if numba:
   """ Faster numba variants """
 
   @numba.jit(nopython=True, nogil=True)
-  def apply_vis_correction(data, correction):
+  def nb_apply_vis_correction(data, correction):
     """Clean up and apply `correction` to visibility data in `data`."""
     out = np.empty_like(data)
     for i in range(out.shape[0]):
@@ -718,7 +726,7 @@ else:
     return out
 
   @numba.jit(nopython=True, nogil=True)
-  def apply_weights_correction(data, correction):
+  def nb_apply_weights_correction(data, correction):
     """Clean up and apply `correction` to weight data in `data`."""
     out = np.empty_like(data)
     for i in range(out.shape[0]):
@@ -733,7 +741,7 @@ else:
     return out
 
   @numba.jit(nopython=True, nogil=True)
-  def apply_flags_correction(data, correction):
+  def nb_apply_flags_correction(data, correction):
     """Set POSTPROC flag wherever `correction` is invalid."""
     out = np.copy(data)
     for i in range(out.shape[0]):
@@ -742,3 +750,7 @@ else:
           if np.isnan(correction[i, j, k]):
             out[i, j, k] |= POSTPROC
     return out
+
+  apply_vis_correction = nb_apply_vis_correction
+  apply_weights_correction = nb_apply_weights_correction
+  apply_flags_correction = nb_apply_flags_correction

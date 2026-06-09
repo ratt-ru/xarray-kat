@@ -1,6 +1,44 @@
 Changelog
 =========
 
+X.Y.Z (DD-MM-YYYY)
+------------------
+* Removed ``interleaved_vfw_store`` (:pr:`69`)
+
+0.0.6 (29-05-2026)
+------------------
+* Fix sign convention of UVW coordinates (:pr:`68`)
+* Output active calibration corrections in katdal comparison script (:pr:`66`)
+* Add a script for comparing MSv4 DataTree values against a katdal dataset (:pr:`65`)
+* Add multiple scans to the katdal comparison test case (:pr:`64`)
+* Improve warning message for ``chunked_array_type`` and ``chunks`` arguments (:pr:`63`)
+* Revert: Allow unsupported arguments in entrypoint methods (:pr:`62`)
+
+0.0.5 (20-05-2026)
+------------------
+* Allow unsupported arguments in entrypoint methods (:pr:`61`)
+* Add a TTL to Multiton instances
+
+0.0.4 (31-03-2026)
+------------------
+* Fix normalise_args incorrectly handling bound classmethods (:pr:`59`)
+
+0.0.3 (18-03-2026)
+------------------
+* Update README.rst and document open_datatree (:pr:`58`)
+* Test application of Van Vleck corrections (:pr:`57`)
+* Add numba to optional testing dependencies (:pr:`56`)
+* Correct application of calibration solutions (:pr:`55`)
+* Add calibration solutions to SyntheticObservation. (:pr:`55`)
+
+0.0.2 (05-03-2026)
+------------------
+* Re-enable Python 3.14 testing (:pr:`54`)
+* Guard xradio and katdal imports with ``pytest.importorskip``.
+  These packages or their dependencies do not yet have Python 3.14 releases. (:pr:`53`)
+* Validate xarray-kat DataTree with xradio (:pr:`46`)
+* Test against Python 3.13 in Pull Requests (:pr:`46`)
+
 0.0.1 (17-02-2026)
 -----------------
 * Fix incorrect type hint export (:pr:`51`)

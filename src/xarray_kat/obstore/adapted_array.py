@@ -13,7 +13,6 @@ from xarray.core.indexing import (
   integer_types,
 )
 
-from tests.conftest import SyntheticObservation, setup_mock_archive_server
 from xarray_kat.xkat_types import ArchiveArrayMetadata
 
 # A selection over (time, frequency, corrprod)
@@ -221,6 +220,12 @@ class VFWAdapter(BackendArray):
 
 
 if __name__ == "__main__":
+  import sys
+  from pathlib import Path as _Path
+
+  sys.path.insert(0, str(_Path(__file__).parent.parent.parent.parent))
+
+  from tests.conftest import SyntheticObservation, setup_mock_archive_server
   from xarray_kat.utils import normalize_chunks
 
   prefix = "12345-sdp-l0"
@@ -277,18 +282,28 @@ if __name__ == "__main__":
     {"time": 2, "frequency": 8, "corrprod": 4},
   )
 
+  from pytest_httpserver import HTTPServer
+
   obs = SyntheticObservation("1234567890", ntime=8, nfreq=16, nants=4)
   obs.add_scan(range(0, 8), "track", "PKS1934")
-  obs.save_to_directory("/tmp/synthobs")
+  archive_path = _Path("/tmp/synthobs")
+  obs.save_to_directory(archive_path)
 
-  token = setup_mock_archive_server(
-    httpserver, tmp_path, "1234567890", require_auth=False
-  )
+  httpserver = HTTPServer()
+  httpserver.start()
+  try:
+    token = setup_mock_archive_server(
+      httpserver, archive_path, "1234567890", require_auth=False
+    )
 
-  # Token should be None when auth not required
-  assert token is None
+    # Token should be None when auth not required
+    assert token is None
 
-  # RDB file should be accessible
-  rdb_url = httpserver.url_for("/1234567890/1234567890_sdp_l0.full.rdb")
+    # RDB file should be accessible
+    rdb_url = httpserver.url_for("/1234567890/1234567890_sdp_l0.full.rdb")
+    print(f"RDB URL: {rdb_url}")
 
-  print(grid[slice(10, 28), np.array([6, 11, 7, 7, 10, 11, 8, 12])])
+    print(grid[slice(10, 28), np.array([6, 11, 7, 7, 10, 11, 8, 12])])
+  finally:
+    httpserver.clear()
+    httpserver.stop()

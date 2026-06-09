@@ -9,7 +9,7 @@ import tensorstore as ts
 
 from xarray_kat.katdal_types import AutoCorrelationIndices
 from xarray_kat.multiton import Multiton
-from xarray_kat.stores.base_store import read_array
+from xarray_kat.tensorstores.base_store import read_array
 from xarray_kat.third_party.vendored.katdal.applycal_minimal import (
   apply_vis_correction,
   calc_correction_per_corrprod,
@@ -137,7 +137,7 @@ def final_visibility_virtual_store(
 
     # Possibly apply calibration solutions
     if cal_solutions is not None:
-      apply_vis_correction(array, cal_solutions)
+      array[:] = apply_vis_correction(array, cal_solutions)
 
   return ts.virtual_chunked(
     read_function=read_chunk,

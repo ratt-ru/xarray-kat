@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from katsdptelstate import TelescopeState
 
-from tests.conftest import SyntheticObservation, create_sensor_data, dict_to_rdb
+from tests.conftest import SyntheticObservation, dict_to_rdb
 
 
 class TestRDBGeneration:
@@ -55,49 +55,6 @@ class TestRDBGeneration:
     ts.load_from_file(rdb_path)
     np.testing.assert_array_equal(ts.get("numpy_array"), data["numpy_array"])
     np.testing.assert_array_equal(ts.get("numpy_2d"), data["numpy_2d"])
-
-
-class TestSensorDataGeneration:
-  """Test sensor data generation."""
-
-  def test_create_sensor_data_default(self):
-    """Test sensor data creation with default single scan."""
-    sensor_data = create_sensor_data(ntime=10)
-
-    assert "Observation/target" in sensor_data
-    assert "Observation/scan_index" in sensor_data
-    assert "Observation/scan_state" in sensor_data
-
-    # Sensor data is now returned as lists
-    assert len(sensor_data["Observation/target"]) == 10
-    assert len(sensor_data["Observation/scan_index"]) == 10
-    assert len(sensor_data["Observation/scan_state"]) == 10
-
-    # All should be in same scan
-    assert all(idx == 0 for idx in sensor_data["Observation/scan_index"])
-    assert all(state == "track" for state in sensor_data["Observation/scan_state"])
-
-  def test_create_sensor_data_multiple_scans(self):
-    """Test sensor data with multiple scans."""
-    scan_configs = [
-      {"indices": range(0, 5), "state": "track", "target_name": "PKS1934"},
-      {"indices": range(5, 8), "state": "slew", "target_name": None},
-      {"indices": range(8, 15), "state": "scan", "target_name": "3C286"},
-    ]
-
-    sensor_data = create_sensor_data(ntime=15, scan_configs=scan_configs)
-
-    # Check scan indices (data is now in list form)
-    scan_idx = sensor_data["Observation/scan_index"]
-    assert all(idx == 0 for idx in scan_idx[:5])
-    assert all(idx == 1 for idx in scan_idx[5:8])
-    assert all(idx == 2 for idx in scan_idx[8:])
-
-    # Check scan states
-    scan_state = sensor_data["Observation/scan_state"]
-    assert all(state == "track" for state in scan_state[:5])
-    assert all(state == "slew" for state in scan_state[5:8])
-    assert all(state == "scan" for state in scan_state[8:])
 
 
 class TestSyntheticObservation:
