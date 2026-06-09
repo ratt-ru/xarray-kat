@@ -1,6 +1,10 @@
 Changelog
 =========
 
+X.Y.Z (DD-MM-YYYY)
+------------------
+* Removed ``interleaved_vfw_store`` (:pr:`69`)
+
 0.0.6 (29-05-2026)
 ------------------
 * Fix sign convention of UVW coordinates (:pr:`68`)
