@@ -6,9 +6,9 @@ from typing import TYPE_CHECKING, get_args
 import numpy as np
 import numpy as npt
 import tensorstore as ts
+from rarg_multiton import Multiton
 
 from xarray_kat.katdal_types import AutoCorrelationIndices
-from xarray_kat.multiton import Multiton
 from xarray_kat.stores.base_store import read_array
 from xarray_kat.third_party.vendored.katdal.applycal_minimal import (
   apply_vis_correction,
