@@ -3,6 +3,7 @@ Changelog
 
 X.Y.Z (DD-MM-YYYY)
 ------------------
+* Fix lifecycle bugs in AsyncLoopSingleton (:pr:`70`)
 * Removed ``interleaved_vfw_store`` (:pr:`69`)
 
 0.0.6 (29-05-2026)
