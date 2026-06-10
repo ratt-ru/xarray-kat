@@ -76,7 +76,7 @@ jobs:
       - name: Install xarray-kat
         run: |
           source .venv/bin/activate
-          pip install .[testing]
+          pip install --group test .
 
       - name: Test xarray-kat
         run: |

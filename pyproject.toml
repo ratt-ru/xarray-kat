@@ -25,18 +25,6 @@ xarray-kat = "xarray_kat.cli:main"
 "xarray-kat" = "xarray_kat.meerkat_chunk_manager:MeerKatChunkManager"
 
 [project.optional-dependencies]
-testing = [
-    "cloudpickle>=3.1.1",
-    "dask>=2025.9.1",
-    "dill>=0.4.0",
-    # not all dependencies have 3.14 releases yet
-    "katdal>=0.23; python_version < '3.14'",
-    "numba>=0.62.1",
-    "pytest>=8.4.2",
-    "pytest-httpserver>=1.1.0",
-    # no 3.14 releases yet
-    "xradio>=1.1.2; python_version >= '3.11' and python_version < '3.14'",
-]
 numba = [
     "numba>=0.62.1",
 ]
@@ -50,6 +38,20 @@ dev = [
     "pre-commit>=4.3.0",
     "tbump>=6.11.0",
 ]
+
+test = [
+    "cloudpickle>=3.1.1",
+    "dask>=2025.9.1",
+    "dill>=0.4.0",
+    # not all dependencies have 3.14 releases yet
+    "katdal>=0.23; python_version < '3.14'",
+    "numba>=0.62.1",
+    "pytest>=8.4.2",
+    "pytest-httpserver>=1.1.0",
+    # no 3.14 releases yet
+    "xradio>=1.1.2; python_version >= '3.11' and python_version < '3.14'",
+]
+
 
 [tool.ruff]
 line-length = 88
