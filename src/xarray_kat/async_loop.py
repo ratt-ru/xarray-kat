@@ -43,46 +43,71 @@ def _run_loop_in_thread(
     log.debug("Done")
 
 
+class _LoopState:
+  """Mutable loop/thread state shared between the singleton and its finalizer.
+
+  Kept separate from ``AsyncLoopSingleton`` so the ``weakref.finalize`` callback
+  can reference this state instead of a bound method of the instance (which would
+  create a strong self-reference and prevent the instance from being collected).
+  """
+
+  __slots__ = ("loop", "thread", "lock", "running")
+
+  def __init__(self) -> None:
+    self.loop: asyncio.AbstractEventLoop | None = None
+    self.thread: threading.Thread | None = None
+    self.lock = threading.Lock()
+    self.running = threading.Event()
+
+
+def _close_state(state: _LoopState) -> None:
+  with state.lock:
+    thread, loop = state.thread, state.loop
+    if not thread or not loop:
+      return
+
+    if loop.is_running():
+      loop.call_soon_threadsafe(loop.stop)
+
+    # A thread cannot join itself; calling close() from a coroutine running on
+    # the loop thread would otherwise deadlock (while holding state.lock).
+    if thread is not threading.current_thread():
+      thread.join()
+
+    state.thread = None
+    state.loop = None
+
+
 class AsyncLoopSingleton(metaclass=Singleton):
-  _loop: asyncio.AbstractEventLoop | None
-  _thread: threading.Thread | None
-  _lock: threading.Lock
-  _running: threading.Event
+  _state: _LoopState
 
   def __init__(self):
-    self._loop = None
-    self._thread = None
-    self._lock = threading.Lock()
-    self._running = threading.Event()
-    weakref.finalize(self, self.close)
+    self._state = _LoopState()
+    weakref.finalize(self, _close_state, self._state)
     self.start()
 
   @property
   def instance(self):
-    return self._loop
+    return self._state.loop
 
   def start(self) -> None:
-    with self._lock:
-      if self._thread and self._thread.is_alive():
+    state = self._state
+    with state.lock:
+      if state.thread and state.thread.is_alive():
         return
 
-      self._loop = asyncio.new_event_loop()
-      self._thread = threading.Thread(
+      state.running.clear()
+      state.loop = asyncio.new_event_loop()
+      state.thread = threading.Thread(
         target=_run_loop_in_thread,
-        args=(self._loop, self._running),
+        args=(state.loop, state.running),
         daemon=True,
         name="AsyncLoopThread",
       )
-      self._thread.start()
+      state.thread.start()
+      # Don't return until run_forever() is actually driving the loop, so
+      # callers of .instance never see a not-yet-running loop.
+      state.running.wait()
 
   def close(self) -> None:
-    with self._lock:
-      if not self._thread or not self._loop:
-        return
-
-      if self._loop.is_running():
-        self._loop.call_soon_threadsafe(self._loop.stop)
-
-      self._thread.join()
-      self._thread = None
-      self._loop = None
+    _close_state(self._state)
