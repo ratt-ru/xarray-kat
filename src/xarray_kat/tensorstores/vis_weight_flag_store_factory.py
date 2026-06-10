@@ -6,14 +6,14 @@ from typing import TYPE_CHECKING, Any, Dict, Iterable, cast
 import tensorstore as ts
 
 from xarray_kat.multiton import Multiton
-from xarray_kat.stores.base_store import base_virtual_store
-from xarray_kat.stores.flag_store import final_flag_store
-from xarray_kat.stores.http_store import http_store_factory
-from xarray_kat.stores.visibility_stores import (
+from xarray_kat.tensorstores.base_store import base_virtual_store
+from xarray_kat.tensorstores.flag_store import final_flag_store
+from xarray_kat.tensorstores.http_store import http_store_factory
+from xarray_kat.tensorstores.visibility_stores import (
   base_visibility_virtual_store,
   final_visibility_virtual_store,
 )
-from xarray_kat.stores.weight_store import scaled_weight_store
+from xarray_kat.tensorstores.weight_store import scaled_weight_store
 from xarray_kat.xkat_types import ArchiveArrayMetadata, VanVleckLiteralType
 
 if TYPE_CHECKING:
