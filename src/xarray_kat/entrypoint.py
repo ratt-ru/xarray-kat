@@ -6,6 +6,7 @@ from types import FrameType
 from typing import TYPE_CHECKING, Any, Dict, Iterable, Tuple
 from urllib.parse import SplitResult, parse_qs, urlsplit
 
+from rarg_multiton import Multiton
 from xarray import DataTree
 from xarray.backends import BackendEntrypoint
 from xarray.backends.api import open_datatree, open_groups
@@ -17,7 +18,6 @@ if TYPE_CHECKING:
 
 from xarray_kat.datatree_factory import DataTreeFactory
 from xarray_kat.katdal_types import TelstateDataProducts, TelstateDataSource
-from xarray_kat.multiton import Multiton
 from xarray_kat.xkat_types import UvwSignConventionType, VanVleckLiteralType
 
 

@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Dict, Iterable, NamedTuple, Set, get_args
 
 import numpy as np
 import tensorstore as ts
+from rarg_multiton import Multiton
 from xarray import Dataset, Variable
 from xarray.core.indexing import LazilyIndexedArray
 
@@ -18,7 +19,6 @@ from xarray_kat.array import (
   ImmediateBackendArray,
 )
 from xarray_kat.katdal_types import corrprod_to_autocorr
-from xarray_kat.multiton import Multiton
 from xarray_kat.stores.vis_weight_flag_store_factory import VisWeightFlagFactory
 from xarray_kat.utils import corrprods_to_baseline_pols
 from xarray_kat.xkat_types import UvwSignConventionType, VanVleckLiteralType

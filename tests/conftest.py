@@ -23,8 +23,8 @@ import pytest
 from katsdptelstate import encoding, rdb_utility
 from katsdptelstate.rdb_writer_base import RDBWriterBase
 from pytest_httpserver import HTTPServer
+from rarg_multiton import Multiton
 
-from xarray_kat.multiton import Multiton
 from xarray_kat.stores.visibility_stores import LOOKUP_TABLES
 from xarray_kat.utils import corrprods_to_baseline_pols
 
