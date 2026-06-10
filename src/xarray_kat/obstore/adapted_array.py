@@ -1,8 +1,10 @@
+import asyncio
+import io
 import multiprocessing
 from concurrent.futures import ThreadPoolExecutor
 from itertools import product
 from threading import Lock
-from typing import Tuple, TypedDict, cast
+from typing import Any, Tuple, TypedDict, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -13,6 +15,7 @@ from xarray.core.indexing import (
   integer_types,
 )
 
+from xarray_kat.async_loop import AsyncLoopSingleton
 from xarray_kat.xkat_types import ArchiveArrayMetadata
 
 # A selection over (time, frequency, corrprod)
@@ -42,6 +45,38 @@ class VisFlagWeightData:
     return self._vis is not None and self._weight is not None and self._flag is not None
 
 
+async def _fetch_component(
+  store: Any,
+  paths_and_starts: list[tuple[str, tuple[int, ...]]],
+  meta: ArchiveArrayMetadata,
+  chunk_extents: tuple[tuple[int, int], ...],
+) -> npt.NDArray:
+  """Download and assemble one array component from archive chunks concurrently."""
+
+  async def _get_bytes(path: str) -> bytes:
+    result = await store.get_async(path)
+    return bytes(await result.bytes_async())
+
+  raw_bytes_list = await asyncio.gather(*(_get_bytes(p) for p, _ in paths_and_starts))
+
+  out_shape = tuple(e - s for s, e in chunk_extents)
+  out = np.empty(out_shape, dtype=meta.dtype)
+
+  for (_, chunk_start), raw_bytes in zip(paths_and_starts, raw_bytes_list):
+    file_arr = np.load(io.BytesIO(raw_bytes))
+    out_slices = []
+    file_slices = []
+    for d, (cs, (ext_s, ext_e)) in enumerate(zip(chunk_start, chunk_extents)):
+      file_size = file_arr.shape[d]
+      overlap_s = max(cs, ext_s)
+      overlap_e = min(cs + file_size, ext_e)
+      out_slices.append(slice(overlap_s - ext_s, overlap_e - ext_s))
+      file_slices.append(slice(overlap_s - cs, overlap_e - cs))
+    out[tuple(out_slices)] = file_arr[tuple(file_slices)]
+
+  return out
+
+
 class VisFlagWeightGrid:
   _vis_meta: ArchiveArrayMetadata
   _weight_meta: ArchiveArrayMetadata
@@ -49,6 +84,7 @@ class VisFlagWeightGrid:
   _flag_meta: ArchiveArrayMetadata
   _preferred_chunks: PreferredChunksType
   _pool: ThreadPoolExecutor
+  _store: Any
   _grid: npt.NDArray
   _locks: npt.NDArray
 
@@ -59,12 +95,14 @@ class VisFlagWeightGrid:
     channel_weight_meta: ArchiveArrayMetadata,
     flag_meta: ArchiveArrayMetadata,
     preferred_chunks: PreferredChunksType,
+    store: Any,
   ):
     self._vis_meta = vis_meta
     self._weight_meta = weight_meta
     self._channel_weight_meta = channel_weight_meta
     self._flag_meta = flag_meta
     self._preferred_chunks = preferred_chunks
+    self._store = store
     self._pool = ThreadPoolExecutor(max_workers=multiprocessing.cpu_count())
 
     if not (vis_meta.shape == weight_meta.shape == flag_meta.shape) or not (
@@ -82,11 +120,21 @@ class VisFlagWeightGrid:
       flag_meta.chunks,
     ]
 
-    time_chunks, freq_chunks, cp_chunks = (max(c) for c in zip(*array_chunks))
-    time_chunks = max(preferred_chunks.get("time", time_chunks), time_chunks)
-    freq_chunks = max(preferred_chunks.get("frequency", freq_chunks), freq_chunks)
-    cp_chunks = max(preferred_chunks.get("corrprod", cp_chunks), cp_chunks)
-    self.chunks = (time_chunks, freq_chunks, cp_chunks)
+    dim_names = ("time", "frequency", "corrprod")
+    a_chunks = t_chunks, f_chunks, cp_chunks = tuple(max(c) for c in zip(*array_chunks))
+    pt_chunks, pf_chunks, pcp_chunks = tuple(
+      preferred_chunks.get(d, p) for d, p in zip(dim_names, a_chunks)
+    )
+
+    def archive_chunk_mul(preferred, archive):
+      """Find the archive chunk multiplier nearest to the preferred chunk"""
+      return max(1, round(preferred / archive)) * archive
+
+    self.chunks = (
+      time_chunks := archive_chunk_mul(pt_chunks, t_chunks),
+      freq_chunks := archive_chunk_mul(pf_chunks, f_chunks),
+      cp_chunks := archive_chunk_mul(pcp_chunks, cp_chunks),
+    )
 
     ntime_chunks, rem = divmod(ntime, time_chunks)
     ntime_chunks += int(rem != 0)
@@ -190,28 +238,65 @@ class VisFlagWeightGrid:
       chunk, source_indices, target_indices = zip(*index)
       self._maybe_retrieve_chunk(chunk, source_indices, target_indices)
 
-  def _maybe_retrieve_chunk(self, chunk, source_index, target_index):
-    def archive_array_paths(chunk_extents, meta: ArchiveArrayMetadata) -> list[str]:
-      paths = []
-      chunk_starts = (
-        tuple(range(s, e, c)) for (s, e), c in zip(chunk_extents, meta.chunks)
-      )
-      for chunk_start in product(*chunk_starts):
-        path_parts = "_".join(f"{c:05d}" for c in chunk_start)
-        path = f"{meta.prefix}/{meta.name}/{path_parts}.npy"
-        paths.append(path)
-      return paths
+  async def _retrieve_chunk_async(
+    self, chunk_extents: tuple[tuple[int, int], ...]
+  ) -> VisFlagWeightData:
+    """Fetch all four components for one virtual chunk concurrently."""
 
+    def paths_and_starts(
+      meta: ArchiveArrayMetadata, extents: tuple[tuple[int, int], ...]
+    ) -> list[tuple[str, tuple[int, ...]]]:
+      starts = [range((s // c) * c, e, c) for (s, e), c in zip(extents, meta.chunks)]
+      result = []
+      for cs in product(*starts):
+        path_parts = "_".join(f"{i:05d}" for i in cs)
+        result.append((f"{meta.prefix}/{meta.name}/{path_parts}.npy", cs))
+      return result
+
+    # Clip virtual chunk extents to actual array boundaries
+    clipped: tuple[tuple[int, int], ...] = tuple(
+      (s, min(e, self.shape[d])) for d, (s, e) in enumerate(chunk_extents)
+    )
+
+    vis_arr, weight_arr, cw_arr, flag_arr = await asyncio.gather(
+      _fetch_component(
+        self._store, paths_and_starts(self._vis_meta, clipped), self._vis_meta, clipped
+      ),
+      _fetch_component(
+        self._store,
+        paths_and_starts(self._weight_meta, clipped),
+        self._weight_meta,
+        clipped,
+      ),
+      _fetch_component(
+        self._store,
+        paths_and_starts(self._channel_weight_meta, clipped[:2]),
+        self._channel_weight_meta,
+        clipped[:2],
+      ),
+      _fetch_component(
+        self._store,
+        paths_and_starts(self._flag_meta, clipped),
+        self._flag_meta,
+        clipped,
+      ),
+    )
+
+    data = VisFlagWeightData()
+    data._vis = vis_arr
+    data._weight = weight_arr * cw_arr[..., np.newaxis]
+    data._flag = flag_arr
+    return data
+
+  def _maybe_retrieve_chunk(self, chunk, source_index, target_index):
     with self._locks[chunk]:
       if not cast(VisFlagWeightData, self._grid[chunk]).has_data:
         chunk_extents = tuple((c * s, (c + 1) * s) for c, s in zip(chunk, self.chunks))
-
-        paths = []
-        paths.extend(archive_array_paths(chunk_extents, self._flag_meta))
-        paths.extend(archive_array_paths(chunk_extents, self._vis_meta))
-        paths.extend(archive_array_paths(chunk_extents, self._weight_meta))
-        paths.extend(archive_array_paths(chunk_extents, self._channel_weight_meta))
-        print(paths)
+        loop = AsyncLoopSingleton().instance
+        future = asyncio.run_coroutine_threadsafe(
+          self._retrieve_chunk_async(chunk_extents), loop
+        )
+        self._grid[chunk] = future.result()
 
 
 class VFWAdapter(BackendArray):
@@ -228,35 +313,37 @@ if __name__ == "__main__":
   from tests.conftest import SyntheticObservation, setup_mock_archive_server
   from xarray_kat.utils import normalize_chunks
 
-  prefix = "12345-sdp-l0"
-  ntime = 100
-  nfreq = 32
-  ncorrprod = (7 * 7 // 2) * 4
+  capture_block_id = "1234567890"
+  prefix = f"{capture_block_id}-sdp-l0"
+  ntime = 8
+  nfreq = 16
+  nants = 4
+  ncorrprod = nants * (nants + 1) // 2 * 4  # 40 (incl. autocorr, 4 pols)
 
   chunk_info = {
     "correlator_data": {
       "prefix": prefix,
       "dtype": "<c8",  # complex64 little-endian
       "shape": (ntime, nfreq, ncorrprod),
-      "chunks": normalize_chunks((1, 8, ncorrprod), (ntime, nfreq, ncorrprod)),
+      "chunks": normalize_chunks((2, 8, ncorrprod), (ntime, nfreq, ncorrprod)),
     },
     "flags": {
       "prefix": prefix,
       "dtype": "|u1",  # uint8
       "shape": (ntime, nfreq, ncorrprod),
-      "chunks": normalize_chunks((8, 8, ncorrprod), (ntime, nfreq, ncorrprod)),
+      "chunks": normalize_chunks((2, 8, ncorrprod), (ntime, nfreq, ncorrprod)),
     },
     "weights": {
       "prefix": prefix,
       "dtype": "|u1",  # uint8
       "shape": (ntime, nfreq, ncorrprod),
-      "chunks": normalize_chunks((8, 8, ncorrprod), (ntime, nfreq, ncorrprod)),
+      "chunks": normalize_chunks((2, 8, ncorrprod), (ntime, nfreq, ncorrprod)),
     },
     "weights_channel": {
       "prefix": prefix,
       "dtype": "<f4",  # float32 little-endian
       "shape": (ntime, nfreq),
-      "chunks": normalize_chunks((8, 8), (ntime, nfreq)),
+      "chunks": normalize_chunks((2, 8), (ntime, nfreq)),
     },
   }
 
@@ -274,17 +361,10 @@ if __name__ == "__main__":
     for name, value in chunk_info.items()
   }
 
-  grid = VisFlagWeightGrid(
-    meta["correlator_data"],
-    meta["weights"],
-    meta["weights_channel"],
-    meta["flags"],
-    {"time": 2, "frequency": 8, "corrprod": 4},
-  )
-
+  from obstore.store import HTTPStore
   from pytest_httpserver import HTTPServer
 
-  obs = SyntheticObservation("1234567890", ntime=8, nfreq=16, nants=4)
+  obs = SyntheticObservation(capture_block_id, ntime=ntime, nfreq=nfreq, nants=nants)
   obs.add_scan(range(0, 8), "track", "PKS1934")
   archive_path = _Path("/tmp/synthobs")
   obs.save_to_directory(archive_path)
@@ -293,17 +373,24 @@ if __name__ == "__main__":
   httpserver.start()
   try:
     token = setup_mock_archive_server(
-      httpserver, archive_path, "1234567890", require_auth=False
+      httpserver, archive_path, capture_block_id, require_auth=False
     )
-
-    # Token should be None when auth not required
     assert token is None
 
-    # RDB file should be accessible
-    rdb_url = httpserver.url_for("/1234567890/1234567890_sdp_l0.full.rdb")
-    print(f"RDB URL: {rdb_url}")
+    store = HTTPStore.from_url(
+      httpserver.url_for("/"), client_options={"allow_http": True}
+    )
 
-    print(grid[slice(10, 28), np.array([6, 11, 7, 7, 10, 11, 8, 12])])
+    grid = VisFlagWeightGrid(
+      meta["correlator_data"],
+      meta["weights"],
+      meta["weights_channel"],
+      meta["flags"],
+      {"time": 2, "frequency": 8, "corrprod": 4},
+      store,
+    )
+
+    print(grid[slice(0, 6), np.array([0, 5, 3, 3, 4, 7, 2, 6])])
   finally:
     httpserver.clear()
     httpserver.stop()
