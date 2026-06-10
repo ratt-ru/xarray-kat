@@ -311,42 +311,18 @@ if __name__ == "__main__":
   sys.path.insert(0, str(_Path(__file__).parent.parent.parent.parent))
 
   from tests.conftest import SyntheticObservation, setup_mock_archive_server
-  from xarray_kat.utils import normalize_chunks
 
-  capture_block_id = "1234567890"
-  prefix = f"{capture_block_id}-sdp-l0"
   ntime = 8
   nfreq = 16
   nants = 4
-  ncorrprod = nants * (nants + 1) // 2 * 4  # 40 (incl. autocorr, 4 pols)
 
-  chunk_info = {
-    "correlator_data": {
-      "prefix": prefix,
-      "dtype": "<c8",  # complex64 little-endian
-      "shape": (ntime, nfreq, ncorrprod),
-      "chunks": normalize_chunks((2, 8, ncorrprod), (ntime, nfreq, ncorrprod)),
-    },
-    "flags": {
-      "prefix": prefix,
-      "dtype": "|u1",  # uint8
-      "shape": (ntime, nfreq, ncorrprod),
-      "chunks": normalize_chunks((2, 8, ncorrprod), (ntime, nfreq, ncorrprod)),
-    },
-    "weights": {
-      "prefix": prefix,
-      "dtype": "|u1",  # uint8
-      "shape": (ntime, nfreq, ncorrprod),
-      "chunks": normalize_chunks((2, 8, ncorrprod), (ntime, nfreq, ncorrprod)),
-    },
-    "weights_channel": {
-      "prefix": prefix,
-      "dtype": "<f4",  # float32 little-endian
-      "shape": (ntime, nfreq),
-      "chunks": normalize_chunks((2, 8), (ntime, nfreq)),
-    },
-  }
+  obs = SyntheticObservation("1234567890", ntime=ntime, nfreq=nfreq, nants=nants)
+  obs.add_scan(range(0, 8), "track", "PKS1934")
+  archive_path = _Path("/tmp/synthobs")
+  obs.save_to_directory(archive_path)
 
+  capture_block_id = obs.capture_block_id
+  chunk_info = obs.create_telstate_dict()["chunk_info"]
   dim_labels = ("time", "frequency", "corrprod")
 
   meta = {
@@ -363,11 +339,6 @@ if __name__ == "__main__":
 
   from obstore.store import HTTPStore
   from pytest_httpserver import HTTPServer
-
-  obs = SyntheticObservation(capture_block_id, ntime=ntime, nfreq=nfreq, nants=nants)
-  obs.add_scan(range(0, 8), "track", "PKS1934")
-  archive_path = _Path("/tmp/synthobs")
-  obs.save_to_directory(archive_path)
 
   httpserver = HTTPServer()
   httpserver.start()
