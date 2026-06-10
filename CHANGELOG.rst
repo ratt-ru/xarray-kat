@@ -3,6 +3,7 @@ Changelog
 
 X.Y.Z (DD-MM-YYYY)
 ------------------
+* Move testing dependencies into a dependency group (:pr:`71`)
 * Fix lifecycle bugs in AsyncLoopSingleton (:pr:`70`)
 * Removed ``interleaved_vfw_store`` (:pr:`69`)
 
