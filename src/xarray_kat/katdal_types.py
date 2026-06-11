@@ -17,8 +17,8 @@ from xarray_kat.third_party.vendored.katdal.visdatav4_minimal import VisibilityD
 
 if TYPE_CHECKING:
   from katsdptelstate import TelescopeState
+  from rarg_python_patterns.multiton import Multiton
 
-  from xarray_kat.multiton import Multiton
   from xarray_kat.third_party.vendored.katdal.applycal_minimal import CorrectionParams
   from xarray_kat.third_party.vendored.katdal.sensordata import SensorCache
 

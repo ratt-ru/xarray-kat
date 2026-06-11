@@ -18,7 +18,7 @@ from xarray.core.indexing import (
 )
 
 if TYPE_CHECKING:
-  from xarray_kat.multiton import Multiton
+  from rarg_python_patterns.multiton import Multiton
 
 
 class AbstractMeerkatArchiveArray(ABC, BackendArray):

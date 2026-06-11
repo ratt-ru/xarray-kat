@@ -7,7 +7,7 @@ import numpy as np
 import numpy.typing as npt
 import tensorstore as ts
 from numpy.lib.format import read_array_header_1_0, read_array_header_2_0, read_magic
-from rarg_multiton import Multiton
+from rarg_python_patterns import Multiton
 
 from xarray_kat.xkat_types import ArchiveArrayMetadata
 

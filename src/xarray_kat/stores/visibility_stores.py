@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, get_args
 import numpy as np
 import numpy as npt
 import tensorstore as ts
-from rarg_multiton import Multiton
+from rarg_python_patterns import Multiton
 
 from xarray_kat.katdal_types import AutoCorrelationIndices
 from xarray_kat.stores.base_store import read_array
