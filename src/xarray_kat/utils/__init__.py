@@ -103,8 +103,8 @@ def normalize_chunks(
   return tuple(normalized)
 
 
-CORRPROD_REGEX = re.compile(
-  r"(?P<dish>[mMsSeE])(?P<number>\d+)(?P<polarization>[hHvV])"
+ANTENNA_RECEPTOR_REGEX = re.compile(
+  r"(?P<prefix>[mMsSeE])(?P<number>\d+)(?P<polarization>[hHvV])"
 )
 
 
@@ -115,15 +115,15 @@ def corrprods_to_baseline_pols(corrprods: npt.NDArray):
 
   for cp1, cp2 in corrprods:
     if (
-      (cp1_match := re.match(CORRPROD_REGEX, cp1)) is None
-      or (cp1_dish := cp1_match.group("dish")) is None
+      (cp1_match := re.match(ANTENNA_RECEPTOR_REGEX, cp1)) is None
+      or (cp1_prefix := cp1_match.group("prefix")) is None
       or (cp1_nr := cp1_match.group("number")) is None
       or (cp1_pol := cp1_match.group("polarization")) is None
     ):
       raise ValueError(f"{cp1} is not a valid correlation product string {cp1_match}")
     if (
-      (cp2_match := re.match(CORRPROD_REGEX, cp2)) is None
-      or (cp2_dish := cp2_match.group("dish")) is None
+      (cp2_match := re.match(ANTENNA_RECEPTOR_REGEX, cp2)) is None
+      or (cp2_prefix := cp2_match.group("prefix")) is None
       or (cp2_nr := cp2_match.group("number")) is None
       or (cp2_pol := cp2_match.group("polarization")) is None
     ):
@@ -131,8 +131,8 @@ def corrprods_to_baseline_pols(corrprods: npt.NDArray):
 
     result.append(
       (
-        f"{cp1_dish.lower()}{cp1_nr}",
-        f"{cp2_dish.lower()}{cp2_nr}",
+        f"{cp1_prefix.lower()}{cp1_nr}",
+        f"{cp2_prefix.lower()}{cp2_nr}",
         f"{cp1_pol.lower()}{cp2_pol.lower()}",
       )
     )

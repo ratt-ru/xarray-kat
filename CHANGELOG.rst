@@ -3,6 +3,7 @@ Changelog
 
 X.Y.Z (DD-MM-YYYY)
 ------------------
+* Rename CORRPROD_REGEX to ANTENNA_RECEPTOR_REGEX (:pr:`74`)
 * Depend on ``rarg-python-patterns`` (renamed ``rarg-multiton``) (:pr:`73`)
 * Depend on ``rarg-multiton`` (:pr:`72`)
 * Move testing dependencies into a dependency group (:pr:`71`)
