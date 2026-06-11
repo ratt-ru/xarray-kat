@@ -12,9 +12,9 @@ from xarray_kat.third_party.vendored.katdal.applycal_minimal import (
 
 if TYPE_CHECKING:
   import numpy.typing as npt
+  from rarg_python_patterns.multiton import Multiton
 
   from xarray_kat.katdal_types import TelstateDataProducts
-  from xarray_kat.multiton import Multiton
   from xarray_kat.xkat_types import ArchiveArrayMetadata
 
 

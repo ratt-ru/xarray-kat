@@ -6,7 +6,7 @@ from types import FrameType
 from typing import TYPE_CHECKING, Any, Dict, Iterable, Tuple
 from urllib.parse import SplitResult, parse_qs, urlsplit
 
-from rarg_multiton import Multiton
+from rarg_python_patterns import Multiton
 from xarray import DataTree
 from xarray.backends import BackendEntrypoint
 from xarray.backends.api import open_datatree, open_groups

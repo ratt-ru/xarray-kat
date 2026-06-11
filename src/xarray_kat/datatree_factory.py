@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Dict, Iterable, NamedTuple, Set, get_args
 
 import numpy as np
 import tensorstore as ts
-from rarg_multiton import Multiton
+from rarg_python_patterns import Multiton
 from xarray import Dataset, Variable
 from xarray.core.indexing import LazilyIndexedArray
 

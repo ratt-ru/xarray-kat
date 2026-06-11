@@ -3,6 +3,7 @@ Changelog
 
 X.Y.Z (DD-MM-YYYY)
 ------------------
+* Depend on ``rarg-python-patterns`` (renamed ``rarg-multiton``)
 * Depend on ``rarg-multiton`` (:pr:`72`)
 * Move testing dependencies into a dependency group (:pr:`71`)
 * Fix lifecycle bugs in AsyncLoopSingleton (:pr:`70`)

@@ -4,7 +4,7 @@ import multiprocessing as mp
 from typing import TYPE_CHECKING, Any, Dict, Iterable, cast
 
 import tensorstore as ts
-from rarg_multiton import Multiton
+from rarg_python_patterns import Multiton
 
 from xarray_kat.stores.base_store import base_virtual_store
 from xarray_kat.stores.flag_store import final_flag_store

@@ -15,8 +15,9 @@ from xarray_kat.third_party.vendored.katdal.vis_flags_weights_minimal import (
 )
 
 if TYPE_CHECKING:
+  from rarg_python_patterns.multiton import Multiton
+
   from xarray_kat.katdal_types import AutoCorrelationIndices, TelstateDataProducts
-  from xarray_kat.multiton import Multiton
   from xarray_kat.xkat_types import ArchiveArrayMetadata
 
 
