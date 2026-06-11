@@ -104,7 +104,7 @@ def normalize_chunks(
 
 
 ANTENNA_RECEPTOR_REGEX = re.compile(
-  r"(?P<prefix>[mMsSeE])(?P<number>\d+)(?P<polarization>[hHvV])"
+  r"(?P<prefix>[mMsSeE])(?P<number>\d+)(?P<receptor>[hHvV])"
 )
 
 
@@ -118,14 +118,14 @@ def corrprods_to_baseline_pols(corrprods: npt.NDArray):
       (cp1_match := re.match(ANTENNA_RECEPTOR_REGEX, cp1)) is None
       or (cp1_prefix := cp1_match.group("prefix")) is None
       or (cp1_nr := cp1_match.group("number")) is None
-      or (cp1_pol := cp1_match.group("polarization")) is None
+      or (cp1_receptor := cp1_match.group("receptor")) is None
     ):
       raise ValueError(f"{cp1} is not a valid correlation product string {cp1_match}")
     if (
       (cp2_match := re.match(ANTENNA_RECEPTOR_REGEX, cp2)) is None
       or (cp2_prefix := cp2_match.group("prefix")) is None
       or (cp2_nr := cp2_match.group("number")) is None
-      or (cp2_pol := cp2_match.group("polarization")) is None
+      or (cp2_receptor := cp2_match.group("receptor")) is None
     ):
       raise ValueError(f"{cp2} is not a valid correlation product string {cp2_match}")
 
@@ -133,7 +133,7 @@ def corrprods_to_baseline_pols(corrprods: npt.NDArray):
       (
         f"{cp1_prefix.lower()}{cp1_nr}",
         f"{cp2_prefix.lower()}{cp2_nr}",
-        f"{cp1_pol.lower()}{cp2_pol.lower()}",
+        f"{cp1_receptor.lower()}{cp2_receptor.lower()}",
       )
     )
 
