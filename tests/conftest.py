@@ -413,7 +413,7 @@ class SyntheticObservation:
     written into the telstate. This allows TelstateDataProducts to find
     a non-None calibration_params when constructed with applycal="all".
 
-    The solutions use unit-amplitude complex gains with random phases so
+    The solutions use complex gains with random amplitudes and phases so
     that the correction is well-defined but non-trivial.
 
     Example:
@@ -432,7 +432,7 @@ class SyntheticObservation:
       spectral info, product_B_parts).
     - Per-capture-block mutable sensor keys for G, K, and B0 products.
 
-    All solutions use unit amplitude with random phases (seeded for
+    All solutions use random amplitudes and phases (seeded for
     reproducibility), so they are invertible but non-trivial.
     """
     n_pols = 2  # 'h' and 'v'
@@ -461,11 +461,14 @@ class SyntheticObservation:
     last_dump_ts = self.sync_time + self.ntime * self.int_time
     rng = np.random.default_rng(42)
 
-    # G (gain): shape (n_pols, n_ants), complex64, unit amplitude.
+    # G (gain): shape (n_pols, n_ants), complex64, amplitude away from unity.
     # Three solutions with different phases to exercise time interpolation.
+    # Non-unit amplitudes ensure autocorrelation pols (hh, vv) are not
+    # trivially 1.0, so gain magnitude handling is actually exercised.
     for ts in (first_dump_ts, mid_dump_ts, last_dump_ts):
       phases_G = rng.uniform(-np.pi, np.pi, (n_pols, n_ants))
-      gains_G = np.exp(1j * phases_G).astype(np.complex64)
+      amps_G = rng.uniform(0.5, 2.0, (n_pols, n_ants))
+      gains_G = (amps_G * np.exp(1j * phases_G)).astype(np.complex64)
       telstate.add(
         f"{self.capture_block_id}_cal_product_G",
         gains_G,
@@ -484,11 +487,13 @@ class SyntheticObservation:
         immutable=False,
       )
 
-    # B0 (bandpass): shape (n_chans, n_pols, n_ants), complex64, unit amplitude.
+    # B0 (bandpass): shape (n_chans, n_pols, n_ants), complex64, amplitude
+    # away from unity (see G above for rationale).
     # Two solutions (step function in time — no interpolation, zeroth-order hold).
     for ts in (first_dump_ts, mid_dump_ts):
       phases_B = rng.uniform(-np.pi, np.pi, (n_freqs, n_pols, n_ants))
-      gains_B = np.exp(1j * phases_B).astype(np.complex64)
+      amps_B = rng.uniform(0.5, 2.0, (n_freqs, n_pols, n_ants))
+      gains_B = (amps_B * np.exp(1j * phases_B)).astype(np.complex64)
       telstate.add(
         f"{self.capture_block_id}_cal_product_B0",
         gains_B,
