@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from numbers import Integral
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING, List, Tuple
 
 import numpy as np
 import numpy.typing as npt
@@ -19,6 +19,8 @@ from xarray.core.indexing import (
 
 if TYPE_CHECKING:
   from rarg_python_patterns.multiton import Multiton
+
+  from xarray_kat.katdal_types import Antenna, TelstateDataProducts
 
 
 class AbstractMeerkatArchiveArray(ABC, BackendArray):
@@ -306,3 +308,66 @@ class ImmediateBackendArray(DelayedBackendArray):
 
   def __getitem__(self, key):
     return super().__getitem__(key).get_duck_array().read().result()
+
+
+class CalibrationBackendArray(BackendArray):
+  __slots__ = (
+    "_data_products",
+    "_timestamps",
+    "_antenna",
+    "_frequencies",
+    "shape",
+    "dtype",
+  )
+
+  _data_products: Multiton[TelstateDataProducts]
+  _timestamps: npt.NDArray
+  _antenna: List[Antenna]
+  _frequencies: npt.NDArray
+  shape: Tuple[int, ...]
+  dtype: npt.DTypeLike
+
+  def __init__(self, data_products: Multiton[TelstateDataProducts]):
+    self._data_products = data_products
+    dp = data_products.instance
+    self._timestamps = dp.timestamps
+    self._antenna = dp.antennas
+    self._frequencies = dp.frequencies
+    self.dtype = np.dtype("complex64")
+    self.shape = (
+      self._timestamps.shape[0],
+      len(self._antenna),
+      self._frequencies.shape[0],
+      4,
+    )
+
+  def __getitem__(self, key):
+    return explicit_indexing_adapter(
+      key, self.shape, IndexingSupport.OUTER, self.generate_calibration_solutions
+    )
+
+  def generate_calibration_solutions(self, key):
+    key_arrays = []
+
+    try:
+      it = list(enumerate(zip(key, self.shape, strict=True)))
+    except ValueError:
+      raise ValueError(
+        f"Key length {len(key)} does not match shape length {self.shape}"
+      )
+
+    for _, (sel, dim_size) in it:
+      if isinstance(sel, slice):
+        start, stop, step = sel.indices(dim_size)
+        key_arrays.append(np.arange(start, stop, step))
+      elif isinstance(sel, Integral):
+        key_arrays.append(np.array([sel]))
+      elif isinstance(sel, np.ndarray) and sel.ndim == 1:
+        key_arrays.append(sel)
+      else:
+        raise TypeError(
+          f"{tuple(map(type, key))} element types "
+          f"should be slice, integer or 1D ndarray"
+        )
+
+    key_shape = tuple(map(len, key_arrays))  # noqa: F841
