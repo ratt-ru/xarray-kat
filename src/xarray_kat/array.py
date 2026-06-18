@@ -324,24 +324,33 @@ class CalibrationBackendArray(BackendArray):
 
   _data_products: Multiton[TelstateDataProducts]
   _timestamps: npt.NDArray
-  _antenna: List[Antenna]
+  _antenna_map: Dict[str, int]
   _frequencies: npt.NDArray
-  shape: Tuple[int, ...]
+  shape: Tuple[int, int, int, int]
   dtype: npt.DTypeLike
 
   def __init__(self, data_products: Multiton[TelstateDataProducts]):
     self._data_products = data_products
     dp = data_products.instance
     self._timestamps = dp.timestamps
-    self._antenna = dp.antennas
+    self._antenna_map = {a.name: i for i, a in enumerate(dp.antennas)}
     self._frequencies = dp.frequencies
     self.dtype = np.dtype("complex64")
     self.shape = (
       self._timestamps.shape[0],
-      len(self._antenna),
+      len(self._antenna_map),
       self._frequencies.shape[0],
       4,
     )
+
+  def __reduce__(self):
+    return (CalibrationBackendArray, (self._data_products,))
+
+  def __eq__(self, other: Any) -> bool:
+    if not isinstance(other, CalibrationBackendArray):
+      return NotImplemented
+
+    return self._data_products == other._data_products
 
   def __getitem__(self, key):
     return explicit_indexing_adapter(

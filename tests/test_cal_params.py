@@ -7,6 +7,7 @@ and its ``calibration_params`` (a :class:`CorrectionParams`) is validated.
 """
 
 from collections import defaultdict
+import pickle
 
 import numpy as np
 import pytest
@@ -163,6 +164,23 @@ def test_calc_correction_per_antenna(httpserver: HTTPServer, tmp_path):
         per_antenna[a, :, p], per_corrprod[:, matches[0]], rtol=1e-6, atol=1e-6
       )
 
+
+
+@pytest.mark.parametrize("applycal", ["all"])
+def test_calibration_array_reduce(httpserver, tmp_path, applycal):
+  _, rdb_url = _build_archive(httpserver, tmp_path, applycal=applycal, with_cal=True)
+
+  datasource = Multiton(
+    TelstateDataSource.from_url,
+    rdb_url,
+    chunk_store=None,
+    capture_block_id=CBID,
+  )
+
+  data_products = Multiton(TelstateDataProducts, datasource, applycal=applycal)
+  array = CalibrationBackendArray(data_products)
+
+  assert array == pickle.loads(pickle.dumps(array))
 
 @pytest.mark.parametrize("applycal", ["all"])
 @pytest.mark.parametrize("stream_name", [""])
