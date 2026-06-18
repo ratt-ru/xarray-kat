@@ -6,8 +6,8 @@ instance created along the way is recovered from ``Multiton._INSTANCE_CACHE``
 and its ``calibration_params`` (a :class:`CorrectionParams`) is validated.
 """
 
-from collections import defaultdict
 import pickle
+from collections import defaultdict
 
 import numpy as np
 import pytest
@@ -128,13 +128,6 @@ def test_calc_correction_per_antenna(httpserver: HTTPServer, tmp_path):
   _, tdp = _open_archive(httpserver, tmp_path, applycal="all", with_cal=True)
   params = tdp.calibration_params
 
-  channels = slice(0, NFREQ)
-  per_antenna = calc_correction_per_antenna(0, channels, params)
-  per_corrprod = calc_correction_per_corrprod(0, channels, params)
-
-  assert per_antenna.shape == (NANTS, NFREQ, 4)
-  assert per_antenna.dtype == np.complex64
-
   # Group inputs by antenna into their (h, v) feed indices. Sorted antenna
   # order matches the antenna axis of per_antenna (which iterates the sorted
   # params.inputs).
@@ -146,15 +139,22 @@ def test_calc_correction_per_antenna(httpserver: HTTPServer, tmp_path):
     antenna = f"{m.group('prefix')}{m.group('number')}"
     receptor = m.group("receptor")
     antenna_receptors[antenna][receptor] = idx
-  antennas = sorted(antenna_receptors)
-  assert len(antennas) == NANTS
+  antenna_map = {k: i for i, k in enumerate(antenna_receptors.keys())}
+  assert len(antenna_map) == NANTS
+
+  channels = slice(0, NFREQ)
+  per_antenna = calc_correction_per_antenna(0, channels, antenna_map, params)
+  per_corrprod = calc_correction_per_corrprod(0, channels, params)
+
+  assert per_antenna.shape == (NANTS, NFREQ, 4)
+  assert per_antenna.dtype == np.complex64
 
   # per_antenna[a, :, p] = g_in[ant_r1] * conj(g_in[ant_r2]) for the antenna's
   # own feeds, with pols ordered (hh, hv, vh, vv). Locate the matching
   # autocorrelation corrprod (same input pair) and compare.
   input1 = np.asarray(params.input1_index)
   input2 = np.asarray(params.input2_index)
-  for a, ant in enumerate(antennas):
+  for ant, a in antenna_map.items():
     hi, vi = antenna_receptors[ant]["h"], antenna_receptors[ant]["v"]
     pol_inputs = [(hi, hi), (hi, vi), (vi, hi), (vi, vi)]  # hh, hv, vh, vv
     for p, (in1, in2) in enumerate(pol_inputs):
@@ -163,7 +163,6 @@ def test_calc_correction_per_antenna(httpserver: HTTPServer, tmp_path):
       np.testing.assert_allclose(
         per_antenna[a, :, p], per_corrprod[:, matches[0]], rtol=1e-6, atol=1e-6
       )
-
 
 
 @pytest.mark.parametrize("applycal", ["all"])
@@ -182,9 +181,9 @@ def test_calibration_array_reduce(httpserver, tmp_path, applycal):
 
   assert array == pickle.loads(pickle.dumps(array))
 
+
 @pytest.mark.parametrize("applycal", ["all"])
-@pytest.mark.parametrize("stream_name", [""])
-def test_calibration_array_backend(httpserver, tmp_path, applycal, stream_name):
+def test_calibration_array_backend(httpserver, tmp_path, applycal):
   _, rdb_url = _build_archive(httpserver, tmp_path, applycal=applycal, with_cal=True)
 
   datasource = Multiton(

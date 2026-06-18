@@ -3,7 +3,7 @@ from __future__ import annotations
 from bisect import insort
 from collections import defaultdict
 from itertools import product
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Dict
 
 import numpy as np
 
@@ -13,7 +13,9 @@ if TYPE_CHECKING:
   from xarray_kat.katdal_types import CorrectionParams
 
 
-def calc_correction_per_antenna(dump: int, channels: slice, params: CorrectionParams):
+def calc_correction_per_antenna(
+  dump: int, channels: slice, antenna_map: Dict[str, int], params: CorrectionParams
+):
   """Prototype: gain correction per channel per *input* for a given dump.
 
   This is the per-antenna-feed counterpart to
@@ -30,6 +32,9 @@ def calc_correction_per_antenna(dump: int, channels: slice, params: CorrectionPa
       Dump index (applicable to full data set, i.e. absolute)
   channels : slice
       Channel indices (applicable to full data set, i.e. absolute)
+  antenna_map : dict
+      ``{antenna_name: index}`` dictionary mapping antenna names
+      into the antenna dimension.
   params : :class:`CorrectionParams`
       Corrections per input
 
@@ -67,7 +72,7 @@ def calc_correction_per_antenna(dump: int, channels: slice, params: CorrectionPa
         f"h and v receptors: {ant_receptors}"
       )
 
-  nant = len(antenna_receptor_map)
+  nant = len(antenna_map)
   npol = 4  # Follows from the above invariant
   nchan = channels.stop - channels.start
   gains = np.ones((nant, nchan, npol), dtype="complex64")
@@ -77,7 +82,8 @@ def calc_correction_per_antenna(dump: int, channels: slice, params: CorrectionPa
     channel_map = params.channel_maps[cal_product]
 
     # Construct each antenna's gains from it's feed receptors
-    for a, (antenna, ((_, hi), (_, vi))) in enumerate(antenna_receptor_map.items()):
+    for antenna_name, ((_, hi), (_, vi)) in antenna_receptor_map.items():
+      a = antenna_map[antenna_name]
       h_corrections = product_corrections[hi][dump]
       v_corrections = product_corrections[vi][dump]
       h_gains = channel_map(h_corrections, channels)

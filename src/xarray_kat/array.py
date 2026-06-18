@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from numbers import Integral
-from typing import TYPE_CHECKING, List, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Tuple
 
 import numpy as np
 import numpy.typing as npt
@@ -22,7 +22,7 @@ from xarray_kat.calibration import calc_correction_per_antenna
 if TYPE_CHECKING:
   from rarg_python_patterns.multiton import Multiton
 
-  from xarray_kat.katdal_types import Antenna, TelstateDataProducts
+  from xarray_kat.katdal_types import TelstateDataProducts
 
 
 class AbstractMeerkatArchiveArray(ABC, BackendArray):
@@ -316,7 +316,7 @@ class CalibrationBackendArray(BackendArray):
   __slots__ = (
     "_data_products",
     "_timestamps",
-    "_antenna",
+    "_antenna_map",
     "_frequencies",
     "shape",
     "dtype",
@@ -361,16 +361,9 @@ class CalibrationBackendArray(BackendArray):
     )
 
   def generate_calibration_solutions(self, key):
-    try:
-      it = list(enumerate(zip(key, self.shape, strict=True)))
-    except ValueError:
-      raise ValueError(
-        f"Key length {len(key)} does not match shape length {self.shape}"
-      )
-
     key_arrays = []
 
-    for _, (sel, dim_size) in it:
+    for sel, dim_size in zip(key, self.shape, strict=True):
       if isinstance(sel, slice):
         key_arrays.append(np.arange(*sel.indices(dim_size)))
       elif isinstance(sel, Integral):
@@ -383,19 +376,21 @@ class CalibrationBackendArray(BackendArray):
           f"should be slice, integer or 1D ndarray"
         )
 
-    key_shape = tuple(map(len, key_arrays))  # noqa: F841
+    key_shape = tuple(map(len, key_arrays))
     time_index, ant_index, chan_index, pol_index = key_arrays
 
     # Compute solutions for all channels
     chan_slice = slice(0, len(self._frequencies))
 
-    solutions = np.empty(key_shape, self.dtype)
+    solutions = np.ones(key_shape, self.dtype)
     cal_params = self._data_products.instance.calibration_params
 
     # Expand to full calibration solutions for each timestamp
     # the slice out the selection in the other dimensions
     for t, dump in enumerate(time_index):
-      antenna_calsols = calc_correction_per_antenna(dump, chan_slice, cal_params)
+      antenna_calsols = calc_correction_per_antenna(
+        dump, chan_slice, self._antenna_map, cal_params
+      )
       solutions[t, ...] = antenna_calsols[np.ix_(ant_index, chan_index, pol_index)]
 
     return solutions
