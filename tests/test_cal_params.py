@@ -9,16 +9,19 @@ and its ``calibration_params`` (a :class:`CorrectionParams`) is validated.
 from collections import defaultdict
 
 import numpy as np
+import pytest
 import xarray
 from pytest_httpserver import HTTPServer
 from rarg_python_patterns import Multiton
+from xarray.core.indexing import LazilyIndexedArray
 
 from tests.conftest import (
   SyntheticObservation,
   setup_mock_archive_server,
 )
+from xarray_kat.array import CalibrationBackendArray
 from xarray_kat.calibration import calc_correction_per_antenna
-from xarray_kat.katdal_types import TelstateDataProducts
+from xarray_kat.katdal_types import TelstateDataProducts, TelstateDataSource
 from xarray_kat.third_party.vendored.katdal.applycal_minimal import (
   CorrectionParams,
   calc_correction_per_corrprod,
@@ -31,8 +34,8 @@ NFREQ = 16
 NANTS = 4
 
 
-def _open_archive(httpserver: HTTPServer, tmp_path, *, applycal, with_cal):
-  """Build a mock archive, serve it, open it and return the TelstateDataProducts."""
+def _build_archive(httpserver: HTTPServer, tmp_path, *, applycal, with_cal):
+  """Build a mock archive, and serve it"""
   obs = SyntheticObservation(CBID, ntime=NTIME, nfreq=NFREQ, nants=NANTS)
   obs.add_scan(range(0, 8), "track", "PKS1934")
   obs.add_scan(range(8, 20), "scan", "3C286")
@@ -42,7 +45,14 @@ def _open_archive(httpserver: HTTPServer, tmp_path, *, applycal, with_cal):
   obs.save_to_directory(tmp_path)
 
   setup_mock_archive_server(httpserver, tmp_path, CBID, require_auth=False)
-  rdb_url = f"{httpserver.url_for('/')}{CBID}/{CBID}_sdp_l0.full.rdb"
+  return obs, f"{httpserver.url_for('/')}{CBID}/{CBID}_sdp_l0.full.rdb"
+
+
+def _open_archive(httpserver: HTTPServer, tmp_path, *, applycal, with_cal):
+  """Build a mock archive, serve it, open it and return the TelstateDataProducts."""
+  obs, rdb_url = _build_archive(
+    httpserver, tmp_path, applycal=applycal, with_cal=with_cal
+  )
 
   # Open via the public entrypoint; this constructs (and caches) the
   # TelstateDataProducts as a side effect.
@@ -152,3 +162,28 @@ def test_calc_correction_per_antenna(httpserver: HTTPServer, tmp_path):
       np.testing.assert_allclose(
         per_antenna[a, :, p], per_corrprod[:, matches[0]], rtol=1e-6, atol=1e-6
       )
+
+
+@pytest.mark.parametrize("applycal", ["all"])
+@pytest.mark.parametrize("stream_name", [""])
+def test_calibration_array_backend(httpserver, tmp_path, applycal, stream_name):
+  _, rdb_url = _build_archive(httpserver, tmp_path, applycal=applycal, with_cal=True)
+
+  datasource = Multiton(
+    TelstateDataSource.from_url,
+    rdb_url,
+    chunk_store=None,
+    capture_block_id=CBID,
+  )
+
+  data_products = Multiton(TelstateDataProducts, datasource, applycal=applycal)
+  array = LazilyIndexedArray(CalibrationBackendArray(data_products))
+
+  dataset = xarray.Dataset(
+    {"DATA": (("time", "antenna_name", "frequency", "polarization"), array)}
+  )
+
+  subds = dataset.isel({"time": slice(0, 10), "frequency": [1, 4, 8]})
+  subds.load()
+
+  assert {"time": 10, "frequency": 3}.items() <= dict(subds.sizes).items()

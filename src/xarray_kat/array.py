@@ -17,6 +17,8 @@ from xarray.core.indexing import (
   explicit_indexing_adapter,
 )
 
+from xarray_kat.calibration import calc_correction_per_antenna
+
 if TYPE_CHECKING:
   from rarg_python_patterns.multiton import Multiton
 
@@ -343,12 +345,13 @@ class CalibrationBackendArray(BackendArray):
 
   def __getitem__(self, key):
     return explicit_indexing_adapter(
-      key, self.shape, IndexingSupport.OUTER, self.generate_calibration_solutions
+      key,
+      self.shape,
+      IndexingSupport.OUTER,
+      self.generate_calibration_solutions,
     )
 
   def generate_calibration_solutions(self, key):
-    key_arrays = []
-
     try:
       it = list(enumerate(zip(key, self.shape, strict=True)))
     except ValueError:
@@ -356,10 +359,11 @@ class CalibrationBackendArray(BackendArray):
         f"Key length {len(key)} does not match shape length {self.shape}"
       )
 
+    key_arrays = []
+
     for _, (sel, dim_size) in it:
       if isinstance(sel, slice):
-        start, stop, step = sel.indices(dim_size)
-        key_arrays.append(np.arange(start, stop, step))
+        key_arrays.append(np.arange(*sel.indices(dim_size)))
       elif isinstance(sel, Integral):
         key_arrays.append(np.array([sel]))
       elif isinstance(sel, np.ndarray) and sel.ndim == 1:
@@ -371,3 +375,18 @@ class CalibrationBackendArray(BackendArray):
         )
 
     key_shape = tuple(map(len, key_arrays))  # noqa: F841
+    time_index, ant_index, chan_index, pol_index = key_arrays
+
+    # Compute solutions for all channels
+    chan_slice = slice(0, len(self._frequencies))
+
+    solutions = np.empty(key_shape, self.dtype)
+    cal_params = self._data_products.instance.calibration_params
+
+    # Expand to full calibration solutions for each timestamp
+    # the slice out the selection in the other dimensions
+    for t, dump in enumerate(time_index):
+      antenna_calsols = calc_correction_per_antenna(dump, chan_slice, cal_params)
+      solutions[t, ...] = antenna_calsols[np.ix_(ant_index, chan_index, pol_index)]
+
+    return solutions
