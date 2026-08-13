@@ -9,6 +9,11 @@ authors = [
 requires-python = ">=3.11"
 dependencies = [
     "katpoint>=0.10.2",
+    # katpoint 0.10.2 (latest release) calls np.row_stack in Target.uvw_basis,
+    # which numpy 2.5.0 removed. Fixed upstream in ska-sa/katpoint 122f90d8
+    # ("Replace deprecated row_stack with vstack"), but unreleased.
+    # Drop this pin once a katpoint release containing that fix is available.
+    "numpy<2.5",
     "katsdptelstate[rdb]>=1.0.0",
     "rarg-python-patterns>=0.0.1",
     "tensorstore>=0.1.81",
