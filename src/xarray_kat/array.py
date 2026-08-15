@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from numbers import Integral
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Tuple
 
 import numpy as np
 import numpy.typing as npt
@@ -17,8 +17,12 @@ from xarray.core.indexing import (
   explicit_indexing_adapter,
 )
 
+from xarray_kat.calibration import calc_correction_per_antenna
+
 if TYPE_CHECKING:
   from rarg_python_patterns.multiton import Multiton
+
+  from xarray_kat.katdal_types import TelstateDataProducts
 
 
 class AbstractMeerkatArchiveArray(ABC, BackendArray):
@@ -306,3 +310,87 @@ class ImmediateBackendArray(DelayedBackendArray):
 
   def __getitem__(self, key):
     return super().__getitem__(key).get_duck_array().read().result()
+
+
+class CalibrationBackendArray(BackendArray):
+  __slots__ = (
+    "_data_products",
+    "_timestamps",
+    "_antenna_map",
+    "_frequencies",
+    "shape",
+    "dtype",
+  )
+
+  _data_products: Multiton[TelstateDataProducts]
+  _timestamps: npt.NDArray
+  _antenna_map: Dict[str, int]
+  _frequencies: npt.NDArray
+  shape: Tuple[int, int, int, int]
+  dtype: npt.DTypeLike
+
+  def __init__(self, data_products: Multiton[TelstateDataProducts]):
+    self._data_products = data_products
+    dp = data_products.instance
+    self._timestamps = dp.timestamps
+    self._antenna_map = {a.name: i for i, a in enumerate(dp.antennas)}
+    self._frequencies = dp.frequencies
+    self.dtype = np.dtype("complex64")
+    self.shape = (
+      self._timestamps.shape[0],
+      len(self._antenna_map),
+      self._frequencies.shape[0],
+      4,
+    )
+
+  def __reduce__(self):
+    return (CalibrationBackendArray, (self._data_products,))
+
+  def __eq__(self, other: Any) -> bool:
+    if not isinstance(other, CalibrationBackendArray):
+      return NotImplemented
+
+    return self._data_products == other._data_products
+
+  def __getitem__(self, key):
+    return explicit_indexing_adapter(
+      key,
+      self.shape,
+      IndexingSupport.OUTER,
+      self.generate_calibration_solutions,
+    )
+
+  def generate_calibration_solutions(self, key):
+    key_arrays = []
+
+    for sel, dim_size in zip(key, self.shape, strict=True):
+      if isinstance(sel, slice):
+        key_arrays.append(np.arange(*sel.indices(dim_size)))
+      elif isinstance(sel, Integral):
+        key_arrays.append(np.array([sel]))
+      elif isinstance(sel, np.ndarray) and sel.ndim == 1:
+        key_arrays.append(sel)
+      else:
+        raise TypeError(
+          f"{tuple(map(type, key))} element types "
+          f"should be slice, integer or 1D ndarray"
+        )
+
+    key_shape = tuple(map(len, key_arrays))
+    time_index, ant_index, chan_index, pol_index = key_arrays
+
+    # Compute solutions for all channels
+    chan_slice = slice(0, len(self._frequencies))
+
+    solutions = np.ones(key_shape, self.dtype)
+    cal_params = self._data_products.instance.calibration_params
+
+    # Expand to full calibration solutions for each timestamp
+    # the slice out the selection in the other dimensions
+    for t, dump in enumerate(time_index):
+      antenna_calsols = calc_correction_per_antenna(
+        dump, chan_slice, self._antenna_map, cal_params
+      )
+      solutions[t, ...] = antenna_calsols[np.ix_(ant_index, chan_index, pol_index)]
+
+    return solutions

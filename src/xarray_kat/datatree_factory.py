@@ -342,13 +342,10 @@ class DataTreeFactory:
         return LazilyIndexedArray(a)
 
     telstate = self._data_products.instance.telstate
-    chunk_info = telstate["chunk_info"]
 
     # Time metadata
-    start_time = telstate["sync_time"] + telstate["first_timestamp"]
-    ntime = chunk_info["correlator_data"]["shape"][0]
+    timestamps = self._data_products.instance.timestamps
     integration_time = telstate["int_time"]
-    timestamps = start_time + np.arange(ntime) * integration_time
 
     # Observation information
     start_utc = calendar.timegm(time.gmtime(timestamps[0]))
@@ -360,11 +357,9 @@ class DataTreeFactory:
 
     # Frequency metadata
     band = telstate["sub_band"]
-    nchan = telstate["n_chans"]
-    bandwidth = telstate["bandwidth"]
     center_freq = telstate["center_freq"]
-    channel_width = bandwidth / nchan
-    chan_freqs = (center_freq - (bandwidth / 2)) + np.arange(nchan) * channel_width
+    frequencies = self._data_products.instance.frequencies
+    channel_width = self._data_products.instance.channel_width
 
     # Antenna metadata
     antennas = self._data_products.instance.antennas
@@ -403,7 +398,7 @@ class DataTreeFactory:
       end_iso=end_iso,
       observer=observer,
       experiment_id=experiment_id,
-      chan_freqs=chan_freqs,
+      chan_freqs=frequencies,
       band=band,
       center_freq=center_freq,
       channel_width=channel_width,
