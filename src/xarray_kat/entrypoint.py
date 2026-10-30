@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import inspect
 import os
 from types import FrameType
@@ -25,6 +26,32 @@ class KatStore(AbstractDataStore):
   """Store for reading from a MeerKAT data source"""
 
 
+#: Overrides tensorstore's default HTTP request concurrency
+HTTP_REQUEST_CONCURRENCY_ENV = "TENSORSTORE_HTTP_REQUEST_CONCURRENCY"
+#: tensorstore's documented default HTTP request concurrency
+DEFAULT_HTTP_REQUEST_CONCURRENCY = 32
+#: Chunk reads in flight per HTTP request in flight. Each chunk is read as
+#: three work items (visibilities, weights and flags) that all need its
+#: visibility chunk, while its flag and weight chunks usually span several
+#: visibility chunks (MeerKAT stores them in larger chunks), so three work
+#: items need about one request
+READS_PER_REQUEST = 3
+
+
+@functools.cache
+def default_max_in_flight() -> int:
+  """Enough chunk reads in flight to keep tensorstore's HTTP request
+  concurrency busy. Cached: tensorstore also reads the environment
+  variable only once."""
+  try:
+    concurrency = int(
+      os.environ.get(HTTP_REQUEST_CONCURRENCY_ENV, DEFAULT_HTTP_REQUEST_CONCURRENCY)
+    )
+  except ValueError:
+    concurrency = DEFAULT_HTTP_REQUEST_CONCURRENCY
+  return READS_PER_REQUEST * max(concurrency, 1)
+
+
 class KatEntryPoint(BackendEntrypoint):
   open_dataset_parameters = [
     "filename_or_obj",
@@ -35,6 +62,7 @@ class KatEntryPoint(BackendEntrypoint):
     "stream_name",
     "uvw_sign_convention",
     "van_vleck",
+    "max_in_flight",
   ]
   description = "Opens a MeerKAT data source"
   supports_groups = True
@@ -87,6 +115,7 @@ class KatEntryPoint(BackendEntrypoint):
     stream_name: str | None = None,
     uvw_sign_convention: UvwSignConventionType = "casa",
     van_vleck: VanVleckLiteralType = "off",
+    max_in_flight: int | None = None,
   ):
     """Open a MeerKAT observation as an :class:`xarray.DataTree`.
 
@@ -123,6 +152,9 @@ class KatEntryPoint(BackendEntrypoint):
         ``"off"`` (default) disables the correction; ``"autocorr"`` corrects
         autocorrelation amplitudes using the MeerKAT F-engine quantisation
         lookup table.
+      max_in_flight: The most chunk reads that ``.load()`` keeps in flight
+        at once. Defaults to three per HTTP request that tensorstore allows
+        in flight (``TENSORSTORE_HTTP_REQUEST_CONCURRENCY``, 32 by default).
 
     Returns:
       Tree whose children are individual scans.
@@ -137,6 +169,7 @@ class KatEntryPoint(BackendEntrypoint):
       stream_name=stream_name,
       uvw_sign_convention=uvw_sign_convention,
       van_vleck=van_vleck,
+      max_in_flight=max_in_flight,
     )
     return DataTree.from_dict(group_dicts)
 
@@ -152,7 +185,11 @@ class KatEntryPoint(BackendEntrypoint):
     stream_name: str | None = None,
     uvw_sign_convention: UvwSignConventionType = "casa",
     van_vleck: VanVleckLiteralType = "off",
+    max_in_flight: int | None = None,
   ) -> Dict[str, Any]:
+    if max_in_flight is None:
+      max_in_flight = default_max_in_flight()
+
     url = str(filename_or_obj)
     urlbits = urlsplit(url)
     assert urlbits.scheme in {"http", "https"}
@@ -190,5 +227,6 @@ class KatEntryPoint(BackendEntrypoint):
       van_vleck,
       endpoint,
       token,
+      max_in_flight,
     )
     return group_factory.create()

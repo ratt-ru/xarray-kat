@@ -88,6 +88,7 @@ class DataTreeFactory:
   _uvw_sign_convention: UvwSignConventionType
   _endpoint: str
   _token: str | None
+  _max_in_flight: int | None
 
   def __init__(
     self,
@@ -101,6 +102,7 @@ class DataTreeFactory:
     van_vleck: VanVleckLiteralType,
     endpoint: str,
     token: str | None = None,
+    max_in_flight: int | None = None,
   ):
     self._chunks = chunks
     self._chunked_array_type = chunked_array_type
@@ -112,6 +114,7 @@ class DataTreeFactory:
     self._van_vleck = van_vleck
     self._endpoint = endpoint
     self._token = token
+    self._max_in_flight = max_in_flight
 
   def merge_chunks(
     self, name: str, array: AbstractMeerkatArchiveArray
@@ -447,15 +450,24 @@ class DataTreeFactory:
         mask_index = slice(mask_index[0], mask_index[-1] + 1)
 
       vis_array = ArrayClass(
-        Multiton(_index_store, corr_data_store, mask_index), meta.cp_argsort, len(pols)
+        Multiton(_index_store, corr_data_store, mask_index),
+        meta.cp_argsort,
+        len(pols),
+        self._max_in_flight,
       )
 
       weight_array = ArrayClass(
-        Multiton(_index_store, weight_store, mask_index), meta.cp_argsort, len(pols)
+        Multiton(_index_store, weight_store, mask_index),
+        meta.cp_argsort,
+        len(pols),
+        self._max_in_flight,
       )
 
       flag_array = ArrayClass(
-        Multiton(_index_store, flag_store, mask_index), meta.cp_argsort, len(pols)
+        Multiton(_index_store, flag_store, mask_index),
+        meta.cp_argsort,
+        len(pols),
+        self._max_in_flight,
       )
 
       data_vars = {
