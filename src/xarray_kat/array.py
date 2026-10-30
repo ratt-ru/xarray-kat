@@ -252,12 +252,19 @@ class DelayedBackendArray(
   ``(time, baseline_id, frequency, polarization)`` form.
   """
 
-  __slots__ = ("array",)
+  __slots__ = ("array", "max_in_flight")
 
   array: Multiton[ts.TensorStore]
+  #: The most chunk reads that ``MeerKatChunkManager.compute`` keeps in
+  #: flight, or None for its default (``open_datatree(max_in_flight=...)``)
+  max_in_flight: int | None
 
   def __init__(
-    self, store: Multiton[ts.Tensorstore], cp_argsort: npt.NDArray, npol: int
+    self,
+    store: Multiton[ts.Tensorstore],
+    cp_argsort: npt.NDArray,
+    npol: int,
+    max_in_flight: int | None = None,
   ):
     super().__init__(
       store.instance.shape,
@@ -267,6 +274,7 @@ class DelayedBackendArray(
       npol,
     )
     self.array = store
+    self.max_in_flight = max_in_flight
 
   @property
   def dtype(self) -> npt.DTypeLike:
@@ -294,9 +302,13 @@ class DelayedBackendArray(
 
 class ImmediateBackendArray(DelayedBackendArray):
   def __init__(
-    self, store: Multiton[ts.Tensorstore], cp_argsort: npt.NDArray, npol: int
+    self,
+    store: Multiton[ts.Tensorstore],
+    cp_argsort: npt.NDArray,
+    npol: int,
+    max_in_flight: int | None = None,
   ):
-    super().__init__(store, cp_argsort, npol)
+    super().__init__(store, cp_argsort, npol, max_in_flight)
 
   def _oindex_get(self, indexer):
     return super()._oindex_get(indexer).get_duck_array().read().result()

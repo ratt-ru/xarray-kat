@@ -97,6 +97,17 @@ class MeerkatArray:
     return self.array.dtype
 
   @property
+  def max_in_flight(self) -> int | None:
+    """The backend array's ``open_datatree(max_in_flight=...)``, found below
+    any indexing adapters"""
+    array: Any = self.array
+    while array is not None:
+      if (value := getattr(array, "max_in_flight", None)) is not None:
+        return value
+      array = getattr(array, "array", None)
+    return None
+
+  @property
   def ndim(self) -> int:
     return self.array.ndim
 
@@ -236,9 +247,7 @@ class MeerKatChunkManager(ChunkManagerEntrypoint):
   def rechunk(self, data: MeerkatArray, chunks, **kwargs) -> MeerkatArray:
     return data.rechunk(chunks, **kwargs)
 
-  def compute(
-    self, *data: MeerkatArray, max_in_flight: int | None = None, **kwargs
-  ) -> tuple[np.ndarray, ...]:
+  def compute(self, *data: MeerkatArray, **kwargs) -> tuple[np.ndarray, ...]:
     """Overrides the ``ChunkManager.compute`` method to reify chunked arrays.
 
     This method attempts to load array data chunk-wise for arrays
@@ -247,11 +256,10 @@ class MeerKatChunkManager(ChunkManagerEntrypoint):
     another's raw inputs. Therefore, an optimal access pattern loads
     their chunks one after the other.
 
-    Args:
-      max_in_flight: The most chunk reads in flight at once, passed as
-        ``ds.load(max_in_flight=...)``. Defaults to three per HTTP request
-        that tensorstore allows in flight
-        (``TENSORSTORE_HTTP_REQUEST_CONCURRENCY``, 32 by default).
+    The most chunk reads kept in flight at once is the arrays'
+    ``open_datatree(max_in_flight=...)``, the smallest if they differ, or
+    three per HTTP request that tensorstore allows in flight
+    (``TENSORSTORE_HTTP_REQUEST_CONCURRENCY``, 32 by default).
 
     Returns:
       tuple of result arrays
@@ -271,9 +279,8 @@ class MeerKatChunkManager(ChunkManagerEntrypoint):
       same_chunks[array.chunks].append((index, array))
 
     # Pipeline retrieval of data
-    pipeline = Pipeline(
-      default_max_in_flight() if max_in_flight is None else max_in_flight
-    )
+    requested = [m for d in data if (m := d.max_in_flight) is not None]
+    pipeline = Pipeline(min(requested) if requested else default_max_in_flight())
 
     # Iterate over groups of arrays with the same chunking
     for chunks, index_and_array in same_chunks.items():

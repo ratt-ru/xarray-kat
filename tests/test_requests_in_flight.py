@@ -104,9 +104,9 @@ def test_requests_in_flight_follow_the_http_request_concurrency(delayed_archive)
   assert counter.peak > 180
 
 
-def open_scan(url, ntime=None):
+def open_scan(url, ntime=None, **kwargs):
   dt = xarray.open_datatree(
-    url, engine="xarray-kat", chunked_array_type="xarray-kat", chunks={}
+    url, engine="xarray-kat", chunked_array_type="xarray-kat", chunks={}, **kwargs
   )
   [node] = [node for node in dt.subtree if "VISIBILITY" in node.ds.data_vars]
   return node.ds[["VISIBILITY", "WEIGHT", "FLAG"]].isel(time=slice(0, ntime))
@@ -118,7 +118,7 @@ def test_max_in_flight_bounds_the_chunk_reads_in_flight(delayed_archive):
   with counter.lock:
     counter.peak = 0
 
-  limited = open_scan(url, ntime=8).load(max_in_flight=3)
+  limited = open_scan(url, ntime=8, max_in_flight=3).load()
 
   # One chunk's VISIBILITY, WEIGHT and FLAG reads fetch at most four base
   # objects (visibilities, flags, weights and channel weights), and the next

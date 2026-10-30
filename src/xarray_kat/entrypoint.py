@@ -35,6 +35,7 @@ class KatEntryPoint(BackendEntrypoint):
     "stream_name",
     "uvw_sign_convention",
     "van_vleck",
+    "max_in_flight",
   ]
   description = "Opens a MeerKAT data source"
   supports_groups = True
@@ -87,6 +88,7 @@ class KatEntryPoint(BackendEntrypoint):
     stream_name: str | None = None,
     uvw_sign_convention: UvwSignConventionType = "casa",
     van_vleck: VanVleckLiteralType = "off",
+    max_in_flight: int | None = None,
   ):
     """Open a MeerKAT observation as an :class:`xarray.DataTree`.
 
@@ -123,6 +125,9 @@ class KatEntryPoint(BackendEntrypoint):
         ``"off"`` (default) disables the correction; ``"autocorr"`` corrects
         autocorrelation amplitudes using the MeerKAT F-engine quantisation
         lookup table.
+      max_in_flight: The most chunk reads that ``.load()`` keeps in flight
+        at once. Defaults to three per HTTP request that tensorstore allows
+        in flight (``TENSORSTORE_HTTP_REQUEST_CONCURRENCY``, 32 by default).
 
     Returns:
       Tree whose children are individual scans.
@@ -137,6 +142,7 @@ class KatEntryPoint(BackendEntrypoint):
       stream_name=stream_name,
       uvw_sign_convention=uvw_sign_convention,
       van_vleck=van_vleck,
+      max_in_flight=max_in_flight,
     )
     return DataTree.from_dict(group_dicts)
 
@@ -152,6 +158,7 @@ class KatEntryPoint(BackendEntrypoint):
     stream_name: str | None = None,
     uvw_sign_convention: UvwSignConventionType = "casa",
     van_vleck: VanVleckLiteralType = "off",
+    max_in_flight: int | None = None,
   ) -> Dict[str, Any]:
     url = str(filename_or_obj)
     urlbits = urlsplit(url)
@@ -190,5 +197,6 @@ class KatEntryPoint(BackendEntrypoint):
       van_vleck,
       endpoint,
       token,
+      max_in_flight,
     )
     return group_factory.create()
