@@ -1,9 +1,11 @@
 Changelog
 =========
 
-X.Y.Z (DD-MM-YYYY)
+0.0.8 (30-10-2026)
 ------------------
-* Keep as many reads in flight as TensorStore allows: size the read pipeline from ``TENSORSTORE_HTTP_REQUEST_CONCURRENCY``, add an ``open_datatree`` ``max_in_flight`` argument, complete reads as they finish, and require ``tensorstore>=0.1.86`` (:pr:`80`)
+* Keep as many reads in flight as TensorStore allows: size the read pipeline
+  from ``TENSORSTORE_HTTP_REQUEST_CONCURRENCY``, add an ``open_datatree`` ``max_in_flight`` argument,
+  complete reads as they finish, and require ``tensorstore>=0.1.86`` (:pr:`80`)
 
 0.0.7 (30-10-2026)
 ------------------
