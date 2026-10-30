@@ -10,6 +10,7 @@ import numpy.typing as npt
 import tensorstore as ts
 from xarray.core.indexing import (
   BasicIndexer,
+  CopyOnWriteArray,
   ImplicitToExplicitIndexingAdapter,
   LazilyIndexedArray,
   OuterIndexer,
@@ -27,17 +28,33 @@ from xarray_kat.utils.chunk_selection import chunk_ranges
 
 
 class MeerkatArray:
-  __slots__ = ("array", "_unselected_chunks", "_selected_chunk_ranges")
+  __slots__ = ("array", "_unselected_chunks", "_selected_chunk_ranges", "max_in_flight")
 
   array: LazilyIndexedArray
   # Chunks associated with the full shape of the array
   # i.e. with no selection applied
   _unselected_chunks: T_NormalizedChunks
   _selected_chunk_ranges: Tuple[OuterIndexerType, ...] | None
+  #: The most chunk reads that ``MeerKatChunkManager.compute`` keeps in
+  #: flight, or None for the backend's default
+  max_in_flight: int | None
 
-  def __init__(self, array: T_DuckArray, chunks: T_NormalizedChunks):
+  def __init__(
+    self,
+    array: T_DuckArray,
+    chunks: T_NormalizedChunks,
+    max_in_flight: int | None = None,
+  ):
     if isinstance(array, ImplicitToExplicitIndexingAdapter):
       array = array.array
+
+    if max_in_flight is None:
+      # From the backend array's open_datatree(max_in_flight=...), below the
+      # copy-on-write adapter that xarray wraps backend arrays in
+      backend = array.array if isinstance(array, CopyOnWriteArray) else array
+      max_in_flight = getattr(backend, "max_in_flight", None)
+
+    self.max_in_flight = max_in_flight
 
     if not isinstance(array, LazilyIndexedArray):
       array = LazilyIndexedArray(array)
@@ -54,7 +71,7 @@ class MeerkatArray:
     else:
       array = self.array[BasicIndexer(xkey)]
 
-    return MeerkatArray(array, self._unselected_chunks)
+    return MeerkatArray(array, self._unselected_chunks, self.max_in_flight)
 
   @property
   def chunk_ranges(self):
@@ -96,17 +113,6 @@ class MeerkatArray:
     return self.array.dtype
 
   @property
-  def max_in_flight(self) -> int | None:
-    """The backend array's ``open_datatree(max_in_flight=...)``, found below
-    any indexing adapters"""
-    array: Any = self.array
-    while array is not None:
-      if (value := getattr(array, "max_in_flight", None)) is not None:
-        return value
-      array = getattr(array, "array", None)
-    return None
-
-  @property
   def ndim(self) -> int:
     return self.array.ndim
 
@@ -115,7 +121,7 @@ class MeerkatArray:
     return self.array.shape
 
   def rechunk(self, chunks, **kwargs):
-    return MeerkatArray(self.array, chunks)
+    return MeerkatArray(self.array, chunks, self.max_in_flight)
 
   def __array_namespace__(self, *, api_version: str | None = None):
     raise NotImplementedError
