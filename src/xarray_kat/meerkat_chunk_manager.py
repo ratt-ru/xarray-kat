@@ -146,8 +146,11 @@ class ReadWriteWorkItem:
 HTTP_REQUEST_CONCURRENCY_ENV = "TENSORSTORE_HTTP_REQUEST_CONCURRENCY"
 #: tensorstore's documented default HTTP request concurrency
 DEFAULT_HTTP_REQUEST_CONCURRENCY = 32
-#: Chunk reads in flight per HTTP request in flight: each chunk reads
-#: visibilities, weights and flags, which share their base chunks
+#: Chunk reads in flight per HTTP request in flight. Each chunk is read as
+#: three work items (visibilities, weights and flags) that all need its
+#: visibility chunk, while its flag and weight chunks usually span several
+#: visibility chunks (MeerKAT stores them in larger chunks), so three work
+#: items need about one request
 READS_PER_REQUEST = 3
 
 

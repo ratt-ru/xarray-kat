@@ -78,6 +78,7 @@ def delayed_archive(synthetic_observation, tmp_path):
   rdb = f"{obs.capture_block_id}_sdp_l0.full.rdb"
   yield f"http://127.0.0.1:{server.server_port}/{rdb}", counter
   server.shutdown()
+  server.server_close()
 
 
 LOAD = """
@@ -114,7 +115,8 @@ def open_scan(url, ntime=None):
 def test_max_in_flight_bounds_the_chunk_reads_in_flight(delayed_archive):
   url, counter = delayed_archive
   expected = open_scan(url, ntime=8).load()
-  counter.peak = 0
+  with counter.lock:
+    counter.peak = 0
 
   limited = open_scan(url, ntime=8).load(max_in_flight=3)
 
