@@ -1,8 +1,10 @@
+import os
+import queue
 import warnings
-from collections import defaultdict, deque
+from collections import defaultdict
 from dataclasses import dataclass
 from itertools import pairwise, product
-from typing import Any, Deque, Tuple
+from typing import Any, Tuple
 
 import numpy as np
 import numpy.typing as npt
@@ -140,6 +142,57 @@ class ReadWriteWorkItem:
     )
 
 
+#: Overrides tensorstore's default HTTP request concurrency
+HTTP_REQUEST_CONCURRENCY_ENV = "TENSORSTORE_HTTP_REQUEST_CONCURRENCY"
+#: tensorstore's documented default HTTP request concurrency
+DEFAULT_HTTP_REQUEST_CONCURRENCY = 32
+#: Chunk reads in flight per HTTP request in flight: each chunk reads
+#: visibilities, weights and flags, which share their base chunks
+READS_PER_REQUEST = 3
+
+
+def default_max_in_flight() -> int:
+  """Enough chunk reads in flight to keep tensorstore's HTTP request
+  concurrency busy."""
+  try:
+    concurrency = int(
+      os.environ.get(HTTP_REQUEST_CONCURRENCY_ENV, DEFAULT_HTTP_REQUEST_CONCURRENCY)
+    )
+  except ValueError:
+    concurrency = DEFAULT_HTTP_REQUEST_CONCURRENCY
+  return READS_PER_REQUEST * max(concurrency, 1)
+
+
+class Pipeline:
+  """Work items whose reads are in flight, executed as their reads complete
+  rather than in the order they were issued, so that a slow read does not
+  hold back the refill"""
+
+  def __init__(self, max_in_flight: int):
+    self.max_in_flight = max(max_in_flight, 1)
+    self.in_flight = 0
+    self.done: queue.SimpleQueue[ReadWriteWorkItem] = queue.SimpleQueue()
+
+  def add(self, item: ReadWriteWorkItem) -> None:
+    if isinstance(item.source, ts.Future):
+      self.in_flight += 1
+      item.source.add_done_callback(lambda _, item=item: self.done.put(item))
+    else:
+      item.execute()
+
+  def wait_below(self, n: int) -> None:
+    """Execute completed work items until fewer than ``n`` are in flight"""
+    while self.in_flight >= n:
+      self.done.get().execute()
+      self.in_flight -= 1
+
+  def make_room(self) -> None:
+    self.wait_below(self.max_in_flight)
+
+  def drain(self) -> None:
+    self.wait_below(1)
+
+
 class MeerKatChunkManager(ChunkManagerEntrypoint):
   def __init__(self):
     self.array_cls = MeerkatArray
@@ -177,7 +230,9 @@ class MeerKatChunkManager(ChunkManagerEntrypoint):
   def rechunk(self, data: MeerkatArray, chunks, **kwargs) -> MeerkatArray:
     return data.rechunk(chunks, **kwargs)
 
-  def compute(self, *data: MeerkatArray, **kwargs) -> tuple[np.ndarray, ...]:
+  def compute(
+    self, *data: MeerkatArray, max_in_flight: int | None = None, **kwargs
+  ) -> tuple[np.ndarray, ...]:
     """Overrides the ``ChunkManager.compute`` method to reify chunked arrays.
 
     This method attempts to load array data chunk-wise for arrays
@@ -185,6 +240,12 @@ class MeerKatChunkManager(ChunkManagerEntrypoint):
     visibilities, flags and weights (VFW) are calculated dependent on one
     another's raw inputs. Therefore, an optimal access pattern loads
     their chunks one after the other.
+
+    Args:
+      max_in_flight: The most chunk reads in flight at once, passed as
+        ``ds.load(max_in_flight=...)``. Defaults to three per HTTP request
+        that tensorstore allows in flight
+        (``TENSORSTORE_HTTP_REQUEST_CONCURRENCY``, 32 by default).
 
     Returns:
       tuple of result arrays
@@ -204,40 +265,35 @@ class MeerKatChunkManager(ChunkManagerEntrypoint):
       same_chunks[array.chunks].append((index, array))
 
     # Pipeline retrieval of data
-    pipeline: Deque[ReadWriteWorkItem] = deque()
-    MAX_IN_FLIGHT = 100
-
-    def maybe_do_pipeline_work():
-      while len(pipeline) >= MAX_IN_FLIGHT:
-        pipeline.popleft().execute()
+    pipeline = Pipeline(
+      default_max_in_flight() if max_in_flight is None else max_in_flight
+    )
 
     # Iterate over groups of arrays with the same chunking
     for chunks, index_and_array in same_chunks.items():
       if len(index_and_array) == 1:
-        maybe_do_pipeline_work()
+        pipeline.make_room()
         # If the group contains a single array, we choose not
         # to load data chunk-wise
         index, array = index_and_array[0]
-        pipeline.append(
-          ReadWriteWorkItem(results[index][...], array.compute()[0], None)
-        )
+        pipeline.add(ReadWriteWorkItem(results[index][...], array.compute()[0], None))
       else:
         # Load data chunk-wise over arrays in a group,
         ranges = [np.concatenate(([0], np.cumsum(c))) for c in chunks]
         indices, arrays = zip(*index_and_array)
 
         for dim_coord_pairs in product(*(pairwise(r) for r in ranges)):
-          maybe_do_pipeline_work()
+          # Outside the batch: its reads are only issued once it closes
+          pipeline.make_room()
 
           with ts.Batch() as b:
             key = tuple(slice(s, e) for s, e in dim_coord_pairs)
             for index, array in zip(indices, arrays):
-              pipeline.append(
+              pipeline.add(
                 ReadWriteWorkItem(results[index][key], array[key].compute()[0], b)
               )
 
-    while len(pipeline) > 0:
-      pipeline.popleft().execute()
+    pipeline.drain()
 
     return results
 

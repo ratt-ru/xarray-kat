@@ -16,7 +16,7 @@ dependencies = [
     "numpy<2.5",
     "katsdptelstate[rdb]>=1.0.0",
     "rarg-python-patterns>=0.0.1",
-    "tensorstore>=0.1.81",
+    "tensorstore>=0.1.86",
     "xarray>=2025.9.1",
 ]
 
