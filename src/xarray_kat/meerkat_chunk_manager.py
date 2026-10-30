@@ -1,5 +1,3 @@
-import functools
-import os
 import queue
 import warnings
 from collections import defaultdict
@@ -23,6 +21,7 @@ from xarray.core.types import T_Chunks, T_DuckArray, T_NormalizedChunks
 from xarray.namedarray._typing import _Chunks
 from xarray.namedarray.parallelcompat import ChunkManagerEntrypoint
 
+from xarray_kat.entrypoint import default_max_in_flight
 from xarray_kat.utils import normalize_chunks
 from xarray_kat.utils.chunk_selection import chunk_ranges
 
@@ -154,32 +153,6 @@ class ReadWriteWorkItem:
     )
 
 
-#: Overrides tensorstore's default HTTP request concurrency
-HTTP_REQUEST_CONCURRENCY_ENV = "TENSORSTORE_HTTP_REQUEST_CONCURRENCY"
-#: tensorstore's documented default HTTP request concurrency
-DEFAULT_HTTP_REQUEST_CONCURRENCY = 32
-#: Chunk reads in flight per HTTP request in flight. Each chunk is read as
-#: three work items (visibilities, weights and flags) that all need its
-#: visibility chunk, while its flag and weight chunks usually span several
-#: visibility chunks (MeerKAT stores them in larger chunks), so three work
-#: items need about one request
-READS_PER_REQUEST = 3
-
-
-@functools.cache
-def default_max_in_flight() -> int:
-  """Enough chunk reads in flight to keep tensorstore's HTTP request
-  concurrency busy. Cached: tensorstore also reads the environment
-  variable only once."""
-  try:
-    concurrency = int(
-      os.environ.get(HTTP_REQUEST_CONCURRENCY_ENV, DEFAULT_HTTP_REQUEST_CONCURRENCY)
-    )
-  except ValueError:
-    concurrency = DEFAULT_HTTP_REQUEST_CONCURRENCY
-  return READS_PER_REQUEST * max(concurrency, 1)
-
-
 class Pipeline:
   """Work items whose reads are in flight, executed as their reads complete
   rather than in the order they were issued, so that a slow read does not
@@ -258,8 +231,8 @@ class MeerKatChunkManager(ChunkManagerEntrypoint):
 
     The most chunk reads kept in flight at once is the arrays'
     ``open_datatree(max_in_flight=...)``, the smallest if they differ, or
-    three per HTTP request that tensorstore allows in flight
-    (``TENSORSTORE_HTTP_REQUEST_CONCURRENCY``, 32 by default).
+    the backend's default for arrays that did not come from
+    ``open_datatree``.
 
     Returns:
       tuple of result arrays
