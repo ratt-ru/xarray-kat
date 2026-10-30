@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
 import numpy as np
 import numpy.typing as npt
 import tensorstore as ts
 
+from xarray_kat.async_loop import AsyncLoopSingleton
 from xarray_kat.third_party.vendored.katdal.applycal_minimal import (
   apply_weights_correction,
   calc_correction_per_corrprod,
@@ -51,11 +53,39 @@ def scaled_weight_store(
   Returns:
     A TensorStore representing the weights scaled by the visibilities.
 
+    The read function awaits the underlying stores rather than blocking on
+    them: a read function that blocks on another TensorStore read can
+    deadlock tensorstore's thread pool.
   """
 
-  def read_chunk(
+  def assign_chunk(
+    domain: ts.IndexDomain,
+    array: np.ndarray,
+    weights: npt.NDArray,
+    channel_weights: npt.NDArray,
+    vis: npt.NDArray,
+  ) -> None:
+    weights *= channel_weights[..., np.newaxis]
+
+    array[...] = weight_power_scale(
+      vis,
+      weights,
+      autocorrs.instance.auto_indices,
+      autocorrs.instance.index1,
+      autocorrs.instance.index2,
+      divide=apply_scaling,
+    )
+
+    if (cal_params := data_products.instance.calibration_params) is not None:
+      cal_solutions = np.empty(array.shape, np.complex64)
+      slices = domain.index_exp
+      for n, dump in enumerate(range(slices[0].start, slices[0].stop)):
+        cal_solutions[n] = calc_correction_per_corrprod(dump, slices[1], cal_params)
+      array[:] = apply_weights_correction(array, cal_solutions)
+
+  async def read_chunk(
     domain: ts.IndexDomain, array: np.ndarray, params: ts.VirtualChunkedReadParameters
-  ) -> ts.KvStore.TimestampedStorageGeneration:
+  ) -> None:
     cws = channel_weights_store.instance
     iws = ts.cast(int_weights_store.instance, cws.dtype)
 
@@ -64,32 +94,15 @@ def scaled_weight_store(
     (channel_weights_future := cws[domain[:-1]].read(batch=params.batch)).force()
     (vis_future := vis_store.instance[domain].read(batch=params.batch)).force()
 
-    # Prepare calibration solutions while waiting for data
-    cal_solutions: npt.NDArray | None = None
-
-    if (cal_params := data_products.instance.calibration_params) is not None:
-      cal_solutions = np.empty(array.shape, np.complex64)
-      slices = domain.index_exp
-      for n, dump in enumerate(range(slices[0].start, slices[0].stop)):
-        cal_solutions[n] = calc_correction_per_corrprod(dump, slices[1], cal_params)
-
-    weights = int_weights_future.result()
-    weights *= channel_weights_future.result()[..., np.newaxis]
-
-    array[...] = weight_power_scale(
-      vis_future.result(),
-      weights,
-      autocorrs.instance.auto_indices,
-      autocorrs.instance.index1,
-      autocorrs.instance.index2,
-      divide=apply_scaling,
-    )
-
-    if cal_solutions is not None:
-      array[:] = apply_weights_correction(array, cal_solutions)
+    weights = await int_weights_future
+    channel_weights = await channel_weights_future
+    vis = await vis_future
+    # Scale and calibrate off the event loop thread
+    await asyncio.to_thread(assign_chunk, domain, array, weights, channel_weights, vis)
 
   return ts.virtual_chunked(
     read_function=read_chunk,
+    loop=AsyncLoopSingleton().instance,
     rank=array_metadata.rank,
     domain=ts.IndexDomain(
       [

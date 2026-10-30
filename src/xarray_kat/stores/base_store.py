@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from functools import reduce
 from io import BytesIO
@@ -9,6 +10,7 @@ import tensorstore as ts
 from numpy.lib.format import read_array_header_1_0, read_array_header_2_0, read_magic
 from rarg_python_patterns import Multiton
 
+from xarray_kat.async_loop import AsyncLoopSingleton
 from xarray_kat.xkat_types import ArchiveArrayMetadata
 
 log = logging.getLogger(__name__)
@@ -67,25 +69,12 @@ def base_virtual_store(
 
   missing_value = array_meta.default
 
-  def read_chunk(
-    domain: ts.IndexDomain, array: np.ndarray, params: ts.VirtualChunkedReadParameters
-  ) -> ts.KvStore.TimestampedStorageGeneration:
-    """Reads the MeerKAT archive npy file associated with the domain,
-    strips off the header and then assigns the resulting data
-    into array:
-
-    00000_00000_00000.npy
-    00001_00000_00000.npy
-    00000_00032_00000.npy
-    """
-    key_parts = [f"{o:05}" for o in domain.origin]
-    key = f"{'_'.join(key_parts)}.npy"
-    log.debug("%d Read %s into domain %s", key, domain)
+  def assign_chunk(
+    domain: ts.IndexDomain, array: np.ndarray, key: str, result: ts.KvStore.ReadResult
+  ) -> ts.KvStore.TimestampedStorageGeneration | None:
     data = None
 
-    if (
-      result := http_store.instance.read(key, batch=params.batch).result()
-    ).state == "value" and (data := read_array(result.value)) is not None:
+    if result.state == "value" and (data := read_array(result.value)) is not None:
       log.debug("Read %s into domain %s", key, domain)
 
     # Fill with defaults if retrieval failed
@@ -97,9 +86,33 @@ def base_virtual_store(
     assert array.shape == data.shape
     chunk_domain = domain.translate_backward_by[domain.origin]
     array[...] = data[chunk_domain.index_exp]
+    return None
+
+  async def read_chunk(
+    domain: ts.IndexDomain, array: np.ndarray, params: ts.VirtualChunkedReadParameters
+  ) -> ts.KvStore.TimestampedStorageGeneration | None:
+    """Reads the MeerKAT archive npy file associated with the domain,
+    strips off the header and then assigns the resulting data
+    into array:
+
+    00000_00000_00000.npy
+    00001_00000_00000.npy
+    00000_00032_00000.npy
+
+    The http read is awaited rather than blocked on: a read function
+    that blocks on another TensorStore operation can deadlock
+    tensorstore's thread pool.
+    """
+    key_parts = [f"{o:05}" for o in domain.origin]
+    key = f"{'_'.join(key_parts)}.npy"
+    log.debug("Read %s into domain %s", key, domain)
+    result = await http_store.instance.read(key, batch=params.batch)
+    # Decode and copy off the event loop thread
+    return await asyncio.to_thread(assign_chunk, domain, array, key, result)
 
   return ts.virtual_chunked(
     read_function=read_chunk,
+    loop=AsyncLoopSingleton().instance,
     rank=len(array_meta.shape),
     domain=ts.IndexDomain(
       [

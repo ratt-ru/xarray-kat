@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING, get_args
 
@@ -8,6 +9,7 @@ import numpy as npt
 import tensorstore as ts
 from rarg_python_patterns import Multiton
 
+from xarray_kat.async_loop import AsyncLoopSingleton
 from xarray_kat.katdal_types import AutoCorrelationIndices
 from xarray_kat.stores.base_store import read_array
 from xarray_kat.third_party.vendored.katdal.applycal_minimal import (
@@ -50,24 +52,12 @@ def base_visibility_virtual_store(
   """
   default_value = array_metadata.default
 
-  def read_chunk(
-    domain: ts.IndexDomain, array: np.ndarray, params: ts.VirtualChunkedReadParameters
-  ) -> ts.KvStore.TimestampedStorageGeneration:
-    """Reads the MeerKAT archive npy file associated with the domain,
-    strips off the header and then assigns the resulting data
-    into array:
-
-    00000_00000_00000.npy
-    00001_00000_00000.npy
-    00000_00032_00000.npy
-    """
-    key_parts = [f"{o:05}" for o in domain.origin]
-    key = f"{'_'.join(key_parts)}.npy"
+  def assign_chunk(
+    domain: ts.IndexDomain, array: np.ndarray, key: str, result: ts.KvStore.ReadResult
+  ) -> None:
     data = None
 
-    if (
-      result := http_store.instance.read(key, batch=params.batch).result()
-    ).state == "value" and (data := read_array(result.value)) is not None:
+    if result.state == "value" and (data := read_array(result.value)) is not None:
       log.debug("Read %s into domain %s", key, domain)
 
     # Fill with defaults if retrieval failed
@@ -93,8 +83,30 @@ def base_visibility_virtual_store(
         f"Should be one of {get_args(VanVleckLiteralType)}"
       )
 
+  async def read_chunk(
+    domain: ts.IndexDomain, array: np.ndarray, params: ts.VirtualChunkedReadParameters
+  ) -> None:
+    """Reads the MeerKAT archive npy file associated with the domain,
+    strips off the header and then assigns the resulting data
+    into array:
+
+    00000_00000_00000.npy
+    00001_00000_00000.npy
+    00000_00032_00000.npy
+
+    The http read is awaited rather than blocked on: a read function
+    that blocks on another TensorStore operation can deadlock
+    tensorstore's thread pool.
+    """
+    key_parts = [f"{o:05}" for o in domain.origin]
+    key = f"{'_'.join(key_parts)}.npy"
+    result = await http_store.instance.read(key, batch=params.batch)
+    # Decode, copy and correct off the event loop thread
+    await asyncio.to_thread(assign_chunk, domain, array, key, result)
+
   return ts.virtual_chunked(
     read_function=read_chunk,
+    loop=AsyncLoopSingleton().instance,
     rank=array_metadata.rank,
     domain=ts.IndexDomain(
       [
@@ -115,32 +127,33 @@ def final_visibility_virtual_store(
   context: ts.Context | None,
 ):
   """Creates a virtual_chunked TensorStore that derives its
-  values from a base visibility store and, possibly a calibration solution store."""
+  values from a base visibility store and, possibly a calibration solution store.
 
-  def read_chunk(
-    domain: ts.IndexDomain, array: np.ndarray, params: ts.VirtualChunkedReadParameters
-  ) -> ts.KvStore.TimestampedStorageGeneration:
-    # Issue visibility data future
-    (vis_future := base_vis_store.instance[domain].read(batch=params.batch)).force()
+  The read function awaits the base store rather than blocking on it:
+  a read function that blocks on another TensorStore read can deadlock
+  tensorstore's thread pool."""
 
-    # Prepare calibration solutions while waiting for visibilities
-    cal_solutions: npt.NDArray | None = None
+  def assign_chunk(domain: ts.IndexDomain, array: np.ndarray, vis: npt.NDArray) -> None:
+    array[:] = vis
 
+    # Possibly apply calibration solutions
     if (cal_params := data_products.instance.calibration_params) is not None:
       cal_solutions = np.empty_like(array, dtype=np.complex64)
       slices = domain.index_exp
       for n, dump in enumerate(range(slices[0].start, slices[0].stop)):
         cal_solutions[n] = calc_correction_per_corrprod(dump, slices[1], cal_params)
-
-    # Read visibilities
-    array[:] = vis_future.result()
-
-    # Possibly apply calibration solutions
-    if cal_solutions is not None:
       array[:] = apply_vis_correction(array, cal_solutions)
+
+  async def read_chunk(
+    domain: ts.IndexDomain, array: np.ndarray, params: ts.VirtualChunkedReadParameters
+  ) -> None:
+    vis = await base_vis_store.instance[domain].read(batch=params.batch)
+    # Copy and calibrate off the event loop thread
+    await asyncio.to_thread(assign_chunk, domain, array, vis)
 
   return ts.virtual_chunked(
     read_function=read_chunk,
+    loop=AsyncLoopSingleton().instance,
     rank=array_metadata.rank,
     domain=ts.IndexDomain(
       [
