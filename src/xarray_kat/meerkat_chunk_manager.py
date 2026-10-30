@@ -10,7 +10,6 @@ import numpy.typing as npt
 import tensorstore as ts
 from xarray.core.indexing import (
   BasicIndexer,
-  CopyOnWriteArray,
   ImplicitToExplicitIndexingAdapter,
   LazilyIndexedArray,
   OuterIndexer,
@@ -25,6 +24,18 @@ from xarray.namedarray.parallelcompat import ChunkManagerEntrypoint
 from xarray_kat.entrypoint import default_max_in_flight
 from xarray_kat.utils import normalize_chunks
 from xarray_kat.utils.chunk_selection import chunk_ranges
+
+
+def find_max_in_flight(array: Any) -> int | None:
+  """The ``open_datatree(max_in_flight=...)`` of the backend array that
+  ``array`` wraps, searching down through any adapters xarray adds"""
+  seen: set[int] = set()
+  while array is not None and id(array) not in seen:
+    if (value := getattr(array, "max_in_flight", None)) is not None:
+      return value
+    seen.add(id(array))
+    array = getattr(array, "array", None)
+  return None
 
 
 class MeerkatArray:
@@ -48,13 +59,11 @@ class MeerkatArray:
     if isinstance(array, ImplicitToExplicitIndexingAdapter):
       array = array.array
 
-    if max_in_flight is None:
-      # From the backend array's open_datatree(max_in_flight=...), below the
-      # copy-on-write adapter that xarray wraps backend arrays in
-      backend = array.array if isinstance(array, CopyOnWriteArray) else array
-      max_in_flight = getattr(backend, "max_in_flight", None)
-
-    self.max_in_flight = max_in_flight
+    # Found once here, then passed on to the arrays that indexing and
+    # rechunking create
+    self.max_in_flight = (
+      find_max_in_flight(array) if max_in_flight is None else max_in_flight
+    )
 
     if not isinstance(array, LazilyIndexedArray):
       array = LazilyIndexedArray(array)
