@@ -1,3 +1,4 @@
+import functools
 import os
 import queue
 import warnings
@@ -154,9 +155,11 @@ DEFAULT_HTTP_REQUEST_CONCURRENCY = 32
 READS_PER_REQUEST = 3
 
 
+@functools.cache
 def default_max_in_flight() -> int:
   """Enough chunk reads in flight to keep tensorstore's HTTP request
-  concurrency busy."""
+  concurrency busy. Cached: tensorstore also reads the environment
+  variable only once."""
   try:
     concurrency = int(
       os.environ.get(HTTP_REQUEST_CONCURRENCY_ENV, DEFAULT_HTTP_REQUEST_CONCURRENCY)
