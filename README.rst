@@ -83,6 +83,14 @@ All keyword arguments below are passed through ``xarray.open_datatree``.
     ``"sdp_l0"``).  Useful when an observation contains multiple streams and
     you want to open a specific one.
 
+``max_in_flight`` : ``int``, optional
+    The most chunk reads that ``.load()`` keeps in flight at once.  By
+    default, three per HTTP request that TensorStore allows in flight: 96 at
+    TensorStore's default concurrency of 32.  To read faster from a
+    high-latency store, raise ``TENSORSTORE_HTTP_REQUEST_CONCURRENCY`` and
+    this default follows; set ``max_in_flight`` only to bound the memory
+    held by reads in flight.
+
 
 Example Usage
 -------------
