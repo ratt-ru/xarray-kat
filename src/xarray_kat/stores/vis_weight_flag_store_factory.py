@@ -175,14 +175,19 @@ class VisWeightFlagFactory:
     # The weight and flag stores use different dtypes
     final_metadata = array_meta["correlator_data"].copy()
 
-    # Create the top level visibility store
-    self._vis = Multiton(
-      final_visibility_virtual_store,
-      base_vis,
-      final_metadata,
-      self._data_products,
-      top_level_thread_ctx,
-    )
+    # Create the top level visibility store. It only applies
+    # calibration solutions: without them, it would only copy
+    # the base visibilities into another zero-filled chunk
+    if self._data_products.instance.calibration_params is None:
+      self._vis = base_vis
+    else:
+      self._vis = Multiton(
+        final_visibility_virtual_store,
+        base_vis,
+        final_metadata,
+        self._data_products,
+        top_level_thread_ctx,
+      )
 
     # Create the top level weight store
     self._weight = Multiton(
