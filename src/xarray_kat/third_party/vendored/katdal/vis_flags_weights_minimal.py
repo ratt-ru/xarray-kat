@@ -117,28 +117,29 @@ if numba:
     ----------
     vis : np.ndarray
         Chunk of visibility data, with dimensions time, frequency, baseline
-        (or any two dimensions then baseline). It must contain all the
-        baselines of a stream, even though only the autocorrelations are used.
+        (or any two dimensions then baseline). Only the autocorrelations
+        that `auto_indices` selects are used, so it may hold only those.
     weights : np.ndarray
-        Chunk of weight data, with the same shape as `vis`
+        Chunk of weight data, with dimensions time, frequency, baseline,
+        holding all the baselines of a stream
     auto_indices, index1, index2 : np.ndarray
         Arrays returned by :func:`corrprod_to_autocorr`
     out : np.ndarray, optional
-        If specified, the output array, with same shape as `vis` and
+        If specified, the output array, with same shape as `weights` and
         dtype ``np.float32``
     divide : bool, optional
         True if weights will be divided by autocorrelations, otherwise
         they will be multiplied
     """
     auto_scale = np.empty(len(auto_indices), np.float32)
-    out = np.empty(vis.shape, np.float32) if out is None else out
+    out = np.empty(weights.shape, np.float32) if out is None else out
     bad_weight = np.float32(2.0**-32)
-    for i in range(vis.shape[0]):
-      for j in range(vis.shape[1]):
+    for i in range(weights.shape[0]):
+      for j in range(weights.shape[1]):
         for k in range(len(auto_indices)):
           autocorr = vis[i, j, auto_indices[k]].real
           auto_scale[k] = np.reciprocal(autocorr) if divide else autocorr
-        for k in range(vis.shape[2]):
+        for k in range(weights.shape[2]):
           p = auto_scale[index1[k]] * auto_scale[index2[k]]
           # If either or both of the autocorrelations has zero power then
           # there is likely something wrong with the system. Set the
@@ -164,14 +165,15 @@ else:
     ----------
     vis : np.ndarray
         Chunk of visibility data, with dimensions time, frequency, baseline
-        (or any two dimensions then baseline). It must contain all the
-        baselines of a stream, even though only the autocorrelations are used.
+        (or any two dimensions then baseline). Only the autocorrelations
+        that `auto_indices` selects are used, so it may hold only those.
     weights : np.ndarray
-        Chunk of weight data, with the same shape as `vis`
+        Chunk of weight data, with dimensions time, frequency, baseline,
+        holding all the baselines of a stream
     auto_indices, index1, index2 : np.ndarray
         Arrays returned by :func:`corrprod_to_autocorr`
     out : np.ndarray, optional
-        If specified, the output array, with same shape as `vis` and
+        If specified, the output array, with same shape as `weights` and
         dtype ``np.float32``
     divide : bool, optional
         True if weights will be divided by autocorrelations, otherwise

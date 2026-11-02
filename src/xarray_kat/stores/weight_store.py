@@ -63,16 +63,18 @@ def scaled_weight_store(
     array: np.ndarray,
     weights: npt.NDArray,
     channel_weights: npt.NDArray,
-    vis: npt.NDArray,
+    autocorr_vis: npt.NDArray,
   ) -> None:
     weights *= channel_weights[..., np.newaxis]
 
-    array[...] = weight_power_scale(
-      vis,
+    # autocorr_vis holds only the autocorrelations, in auto_indices order
+    weight_power_scale(
+      autocorr_vis,
       weights,
-      autocorrs.instance.auto_indices,
+      np.arange(autocorr_vis.shape[-1]),
       autocorrs.instance.index1,
       autocorrs.instance.index2,
+      out=array,
       divide=apply_scaling,
     )
 
@@ -92,7 +94,10 @@ def scaled_weight_store(
     # Issue reads to the underlying stores
     (int_weights_future := iws[domain].read(batch=params.batch)).force()
     (channel_weights_future := cws[domain[:-1]].read(batch=params.batch)).force()
-    (vis_future := vis_store.instance[domain].read(batch=params.batch)).force()
+    # Only the autocorrelations scale the weights: reading every
+    # baseline would copy the whole visibility chunk
+    autocorr_vis = vis_store.instance[domain][..., autocorrs.instance.auto_indices]
+    (vis_future := autocorr_vis.read(batch=params.batch)).force()
 
     weights = await int_weights_future
     channel_weights = await channel_weights_future
