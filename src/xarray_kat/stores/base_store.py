@@ -38,13 +38,12 @@ def read_array(raw_bytes: bytes) -> npt.NDArray | None:
     return None
 
   # Are there enough bytes for a reconstruction?
-  if len(array_bytes := raw_bytes[fp.tell() :]) != reduce(mul, shape, dtype.itemsize):
+  if len(raw_bytes) - fp.tell() != reduce(mul, shape, dtype.itemsize):
     return None
 
   assert not fortran_order, "Data should always be C-ordered"
-  result = np.ndarray(shape, dtype, array_bytes)
-  result.shape = shape
-  return result
+  # A read-only view over raw_bytes: slicing off the header would copy the payload
+  return np.ndarray(shape, dtype, raw_bytes, offset=fp.tell())
 
 
 def base_virtual_store(
