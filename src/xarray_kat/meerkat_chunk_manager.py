@@ -156,16 +156,19 @@ class ReadWriteWorkItem:
   batch: ts.Batch | None
 
   def __post_init__(self):
-    # Issue any (batched) futures
+    # Issue any (batched) futures, writing straight into dest:
+    # a read would allocate a zero-filled array, only to be copied into dest
     if isinstance(self.source, ts.TensorStore):
-      self.source = self.source.read(batch=self.batch)
+      dest = ts.array(self.dest, copy=False, write=True)
+      self.source = dest.write(self.source, batch=self.batch).commit
     elif not isinstance(self.source, np.ndarray):
       warnings.warn(f"Unexpected array type {type(self.source)}", UserWarning)
 
   def execute(self):
-    self.dest[:] = (
-      self.source.result() if isinstance(self.source, ts.Future) else self.source
-    )
+    if isinstance(self.source, ts.Future):
+      self.source.result()
+    else:
+      self.dest[:] = self.source
 
 
 class Pipeline:
