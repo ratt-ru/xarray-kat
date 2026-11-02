@@ -1,6 +1,12 @@
 Changelog
 =========
 
+X.Y.Z (DD-MM-YYYY)
+------------------
+* Remove redundant copies from the read path: decode chunks in place, write chunks straight into
+  ``compute``'s results, skip the final visibility store without calibration, and scale weights
+  from the autocorrelations alone (:pr:`81`)
+
 0.0.8 (30-10-2026)
 ------------------
 * Keep as many reads in flight as TensorStore allows: size the read pipeline
